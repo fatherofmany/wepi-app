@@ -1025,8 +1025,7 @@ const renderProfile = () => (
       <div className="fixed bottom-0 left-1/2 transform -translate-x-1/2 w-full max-w-md">
         <div className="bg-gradient-to-r from-purple-600 to-purple-800 p-4 rounded-t-3xl shadow-2xl">
           <div className="flex justify-around">
-            <WePiLogo size="small" variant="icon" />
-
+            
             <NavButton
               icon={Home}
               label="Home"
