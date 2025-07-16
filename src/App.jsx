@@ -1256,7 +1256,6 @@ const payPi = async (amount, memo = "WePi Purchase", metadata = {}) => {
   }
 };
 
-
   // Sample data
   const recentActivity = [
     { id: 1, type: 'sent', recipient: 'Anna', amount: -1.2504, date: 'Today', icon: Send },
@@ -1287,6 +1286,44 @@ const payPi = async (amount, memo = "WePi Purchase", metadata = {}) => {
     { id: 3, title: 'Write Product Review', reward: 0.25, time: '10 min', difficulty: 'Easy', category: 'Content' },
     { id: 4, title: 'Refer 3 Friends', reward: 2.50, time: '30 min', difficulty: 'Hard', category: 'Referral' }
   ];
+
+  const handleBuyNow = (item) => {
+  alert(`Simulated checkout:\n${item.name} for ${item.price}π`);
+  setPiBalance(prev => Math.max(0, prev - item.price));
+};
+
+  const handlePiPayment = () => {
+    if (!window?.Pi) {
+      alert("Pi SDK not available. Please open in Pi Browser.");
+      return;
+    }
+
+    window.Pi.createPayment(
+      {
+        amount: 1.5,
+        memo: "WePi Test Purchase",
+        metadata: { item: "test-purchase", user: "pioneer" }
+      },
+      {
+        onReadyForServerApproval: (paymentId) => {
+          console.log("✅ Ready for approval:", paymentId);
+          alert(`Mock approval step\nPayment ID: ${paymentId}`);
+        },
+        onReadyForServerCompletion: (paymentId, txid) => {
+          console.log("✅ Completed:", paymentId, txid);
+          alert(`Payment complete!\nTxID: ${txid}`);
+        },
+        onCancel: (paymentId) => {
+          console.log("❌ Cancelled:", paymentId);
+          alert("User cancelled the payment.");
+        },
+        onError: (err, payment) => {
+          console.error("💥 Payment Error:", err);
+          alert("An error occurred.");
+        }
+      }
+    );
+  };
 
   const filteredMarketplace = selectedCategory === 'all' 
     ? marketplaceItems 
@@ -1515,6 +1552,14 @@ const payPi = async (amount, memo = "WePi Purchase", metadata = {}) => {
         </div>
       ))}
     </div>
+    <div className="mt-6 text-center">
+  <button
+    onClick={handlePiPayment}
+    className="bg-orange-500 text-white px-6 py-3 rounded-xl hover:bg-orange-600 transition"
+  >
+    🔐 Test Pi Payment
+  </button>
+</div> 
   </div>
 );
 
