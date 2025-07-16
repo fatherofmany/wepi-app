@@ -10,11 +10,85 @@ import {
 
 import WePiLogo from './components/WePiLogo';
 
+// ------------------------------------------------------------------
+// 1)  Splash Screen – uses your custom logo
+// ------------------------------------------------------------------
+const Splash = ({ onDone }) => {
+  const [visible, setVisible] = React.useState(true);
+
+  React.useEffect(() => {
+    const t = setTimeout(() => setVisible(false), 1500);
+    return () => clearTimeout(t);
+  }, []);
+
+  React.useEffect(() => {
+    if (!visible) onDone();
+  }, [visible, onDone]);
+
+  return (
+    <div
+      className={`fixed inset-0 bg-gradient-to-br from-purple-700 to-purple-900 flex flex-col items-center justify-center transition-opacity duration-500 z-[9999] ${
+        visible ? 'opacity-100' : 'opacity-0 pointer-events-none'
+      }`}
+    >
+      {/* === YOUR LOGO (exact markup) === */}
+      <div className="flex items-center space-x-3">
+        <div className="w-20 h-20 bg-gradient-to-br from-purple-500 via-purple-600 to-orange-500 rounded-2xl flex items-center justify-center shadow-lg relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/10 to-white/20"></div>
+          <div className="relative flex items-center justify-center">
+            <span className="font-black text-white text-3xl tracking-tighter">Wπ</span>
+            <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-400 rounded-full animate-pulse"></div>
+          </div>
+        </div>
+        <div className="flex items-baseline">
+          <span className="font-black text-white text-2xl">WePi</span>
+        </div>
+      </div>
+
+      {/* tiny loader for polish */}
+      <div className="mt-6 w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
+    </div>
+  );
+};
+
 if (window?.Pi) {
   window.Pi.init({
     version: '2.0',
     sandbox: true, // Set to false when going live
   });
+}
+
+ const scopes = ['payments', 'username'];
+  function onIncompletePaymentFound(p) {
+    // auto-retry or cancel unfinished payments
+    console.log('incomplete:', p);
+  }
+  Pi.authenticate(scopes, onIncompletePaymentFound)
+    .then(auth => console.log('✅ Ready, accessToken:', auth.accessToken))
+    .catch(err => console.error(err));
+
+    async function payPi(amount, memo = 'WePi purchase', metadata = {}) {
+  try {
+    const payment = await Pi.createPayment({
+      amount: amount.toString(),
+      memo,
+      metadata
+    });
+    // 1) Ask your backend to approve
+    const { txid } = await fetch('/payments/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paymentId: payment.identifier })
+    }).then(r => r.json());
+
+    // 2) Complete the payment
+    await Pi.submitPayment(payment);
+    await Pi.completePayment(payment.identifier, txid);
+    return txid;
+  } catch (err) {
+    console.error(err);
+    throw err;
+  }
 }
 
 
@@ -78,62 +152,70 @@ const LuckyWheel = ({ userAddress, piBalance, onWin, onSpend }) => {
   const [customSpinCost, setCustomSpinCost] = useState("0.5");
 
   const spinWheel = async () => {
-    const spinCost = parseFloat(customSpinCost);
-    if (isSpinning || !userAddress || spinCost <= 0 || piBalance < spinCost) return;
-    
-    try {
-      setIsSpinning(true);
-      setSelectedPrize(null);
-      
-      // Deduct PI from balance
-      onSpend(spinCost);
-      
-      // Simulate wheel spin with random selection
-      const totalRotations = 5 + Math.random() * 5;
-      const finalRotation = rotation + totalRotations * 360;
-      
-      // Calculate which prize the wheel lands on
-      const segmentAngle = 360 / WHEEL_PRIZES.length;
-      const normalizedRotation = finalRotation % 360;
-      const selectedIndex = Math.floor(normalizedRotation / segmentAngle);
-      const selectedPrizeData = WHEEL_PRIZES[selectedIndex];
-      
-      setRotation(finalRotation);
-      
-      // Add to spin history
-      const newSpin = {
-        id: Date.now(),
-        prize: selectedPrizeData,
-        timestamp: Date.now(),
-        cost: spinCost
-      };
-      setSpinHistory(prev => [...prev, newSpin]);
-      
-      // Set result after animation
-      setTimeout(() => {
-        setSelectedPrize(selectedPrizeData);
-        
-        // Calculate winnings
-        if (selectedPrizeData.multiplier !== "0x") {
-          const multiplier = parseFloat(selectedPrizeData.multiplier.replace('x', ''));
-          const winAmount = spinCost * multiplier;
-          setClaimableWinnings({
-            amount: winAmount,
-            multiplier: selectedPrizeData.multiplier,
-            icon: selectedPrizeData.icon,
-            prize: selectedPrizeData
-          });
-          onWin?.(winAmount);
-        }
-        
-        setIsSpinning(false);
-      }, 4000);
-      
-    } catch (error) {
-      console.error('Wheel spin failed:', error);
+  const spinCost = parseFloat(customSpinCost);
+  if (isSpinning || !userAddress || spinCost <= 0 || piBalance < spinCost) return;
+
+  try {
+    setIsSpinning(true);
+    setSelectedPrize(null);
+
+    // REAL TESTNET PAYMENT
+    const payment = await Pi.createPayment({
+      amount: spinCost.toString(),
+      memo: 'LuckyWheel spin',
+      metadata: { game: 'wheel', cost: spinCost }
+    });
+    const { txid } = await fetch('/payments/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paymentId: payment.identifier })
+    }).then(r => r.json());
+
+    await Pi.submitPayment(payment);
+    await Pi.completePayment(payment.identifier, txid);
+    onSpend(spinCost); // update local balance after success
+
+    // Simulate wheel spin with random selection
+    const totalRotations = 5 + Math.random() * 5;
+    const finalRotation = rotation + totalRotations * 360;
+
+    const segmentAngle = 360 / WHEEL_PRIZES.length;
+    const normalizedRotation = finalRotation % 360;
+    const selectedIndex = Math.floor(normalizedRotation / segmentAngle);
+    const selectedPrizeData = WHEEL_PRIZES[selectedIndex];
+
+    setRotation(finalRotation);
+
+    const newSpin = {
+      id: Date.now(),
+      prize: selectedPrizeData,
+      timestamp: Date.now(),
+      cost: spinCost
+    };
+    setSpinHistory(prev => [...prev, newSpin]);
+
+    setTimeout(() => {
+      setSelectedPrize(selectedPrizeData);
+
+      if (selectedPrizeData.multiplier !== "0x") {
+        const multiplier = parseFloat(selectedPrizeData.multiplier.replace('x', ''));
+        const winAmount = spinCost * multiplier;
+        setClaimableWinnings({
+          amount: winAmount,
+          multiplier: selectedPrizeData.multiplier,
+          icon: selectedPrizeData.icon,
+          prize: selectedPrizeData
+        });
+        onWin?.(winAmount);
+      }
+
       setIsSpinning(false);
-    }
-  };
+    }, 4000);
+  } catch (error) {
+    console.error('Wheel spin failed:', error);
+    setIsSpinning(false);
+  }
+};
 
   const claimWinnings = async () => {
     if (!claimableWinnings) return;
@@ -334,85 +416,91 @@ const Lottery = ({ userAddress, piBalance, onWin, onSpend }) => {
   const [lotteryState, setLotteryState] = useState("open");
 
   const enterLottery = async () => {
-    const entryCost = parseFloat(GAS_FEES.lottery);
-    
-    if (players.length >= MAX_PLAYERS_PER_ROUND) {
-      alert("This round is full! Maximum 30 players reached.");
-      return;
+  const entryCost = parseFloat(GAS_FEES.lottery);
+
+  if (players.length >= MAX_PLAYERS_PER_ROUND) {
+    alert("This round is full! Maximum 30 players reached.");
+    return;
+  }
+
+  if (players.some(p => p.address === userAddress)) {
+    alert("You're already entered in this round!");
+    return;
+  }
+
+  if (piBalance < entryCost) {
+    alert("Insufficient π balance!");
+    return;
+  }
+
+  try {
+    setLoading(true);
+
+    // REAL TESTNET PAYMENT
+    const payment = await Pi.createPayment({
+      amount: entryCost.toString(),
+      memo: 'Lottery entry',
+      metadata: { game: 'lottery', cost: entryCost }
+    });
+    const { txid } = await fetch('/payments/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paymentId: payment.identifier })
+    }).then(r => r.json());
+
+    await Pi.submitPayment(payment);
+    await Pi.completePayment(payment.identifier, txid);
+    onSpend(entryCost); // update local balance
+
+    const newPlayer = {
+      address: userAddress,
+      timestamp: Date.now()
+    };
+    setPlayers(prev => [...prev, newPlayer]);
+
+    if (players.length + 1 >= MAX_PLAYERS_PER_ROUND) {
+      setLotteryState("full");
+    }
+  } catch (err) {
+    console.error("Entry failed:", err);
+  } finally {
+    setLoading(false);
+  }
+};
+
+const pickWinner = async () => {
+  if (players.length === 0) return;
+
+  try {
+    setLoading(true);
+    setLotteryState("drawing");
+
+    // Simulate random winner selection
+    const winnerIndex = Math.floor(Math.random() * players.length);
+    const winnerData = players[winnerIndex];
+
+    const prizePool = players.length * parseFloat(GAS_FEES.lottery) * 0.95;
+
+    setWinner(`🎉 Winner: ${winnerData.address.slice(0, 6)}...${winnerData.address.slice(-4)} won ${prizePool.toFixed(2)} π!`);
+    setLotteryState("ended");
+
+    if (winnerData.address === userAddress) {
+      onWin(prizePool);
     }
 
-    if (players.some(p => p.address === userAddress)) {
-      alert("You're already entered in this round!");
-      return;
-    }
-
-    if (piBalance < entryCost) {
-      alert("Insufficient π balance!");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      
-      // Deduct PI from balance
-      onSpend(entryCost);
-      
-      // Add player to the list
-      const newPlayer = {
-        address: userAddress,
-        timestamp: Date.now()
-      };
-      
-      setPlayers(prev => [...prev, newPlayer]);
-      
-      if (players.length + 1 >= MAX_PLAYERS_PER_ROUND) {
-        setLotteryState("full");
-      }
-      
-    } catch (err) {
-      console.error("Entry failed:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const pickWinner = async () => {
-    if (players.length === 0) return;
-
-    try {
-      setLoading(true);
-      setLotteryState("drawing");
-      
-      // Simulate random winner selection
-      const winnerIndex = Math.floor(Math.random() * players.length);
-      const winnerData = players[winnerIndex];
-      
-      // Calculate prize pool (95% of total entries, 5% platform fee)
-      const prizePool = players.length * parseFloat(GAS_FEES.lottery) * 0.95;
-      
-      setWinner(`🎉 Winner: ${winnerData.address.slice(0, 6)}...${winnerData.address.slice(-4)} won ${prizePool.toFixed(2)} π!`);
-      setLotteryState("ended");
-      
-      // If current user won, add to their balance
-      if (winnerData.address === userAddress) {
-        onWin(prizePool);
-      }
-      
-      // Start new round after delay
-      setTimeout(() => {
-        setPlayers([]);
-        setWinner("");
-        setCurrentRound(prev => prev + 1);
-        setLotteryState("open");
-      }, 5000);
-      
-    } catch (err) {
-      console.error("Draw failed:", err);
+    setTimeout(() => {
+      setPlayers([]);
+      setWinner("");
+      setCurrentRound(prev => prev + 1);
       setLotteryState("open");
-    } finally {
-      setLoading(false);
-    }
-  };
+    }, 5000);
+  } catch (err) {
+    console.error("Draw failed:", err);
+    setLotteryState("open");
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <div className="space-y-6">
@@ -742,11 +830,37 @@ const PiLotComponent = ({ onBack, piBalance, setPiBalance }) => {
     }
   };
 
-  const handleTripStart = () => {
-    setCurrentStep('trip');
-    const vehiclePrice = vehicleTypes.find(v => v.id === selectedVehicle).price;
+  // --------------------------------------------
+// 4c) PiLot ride booking – Pi Testnet-ready
+// --------------------------------------------
+const handleTripStart = async () => {
+  const vehiclePrice = vehicleTypes.find(v => v.id === selectedVehicle).price;
+
+  try {
+    // 1) create + approve + submit + complete
+    const payment = await Pi.createPayment({
+      amount: vehiclePrice.toString(),
+      memo: 'PiLot ride',
+      metadata: { vehicle: selectedVehicle }
+    });
+
+    const { txid } = await fetch('/payments/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paymentId: payment.identifier })
+    }).then(r => r.json());
+
+    await Pi.submitPayment(payment);
+    await Pi.completePayment(payment.identifier, txid);
+
+    // 2) only after success → update UI balance
     setPiBalance(prev => prev - vehiclePrice);
-  };
+    setCurrentStep('trip');
+  } catch (err) {
+    alert('Payment failed');
+    console.error(err);
+  }
+};
 
   const renderBookingInterface = () => (
     <div className="space-y-6">
@@ -1309,73 +1423,96 @@ const WePiApp = () => {
   );
 
   const renderMarketplace = () => (
-    <div className="space-y-4">
-      <Header title="Marketplace" showBack />
-      
-      {/* Search Bar */}
-      <div className="mx-4">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-          <input
-            type="text"
-            placeholder="Search products..."
-            className="w-full pl-10 pr-4 py-3 bg-white rounded-2xl border border-gray-200 focus:border-purple-500 focus:outline-none"
-          />
-          <Filter className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-        </div>
-      </div>
+  <div className="space-y-4">
+    <Header title="Marketplace" showBack />
 
-      {/* Categories */}
-      <div className="mx-4">
-        <div className="flex space-x-3 overflow-x-auto pb-2">
-          {[
-            { id: 'all', label: 'All', icon: '🛍️' },
-            { id: 'clothing', label: 'Clothing', icon: '👕' },
-            { id: 'electronics', label: 'Electronics', icon: '📱' },
-            { id: 'vehicles', label: 'Vehicles', icon: '🚗' },
-            { id: 'food', label: 'Food', icon: '🍕' }
-          ].map((category) => (
-            <button
-              key={category.id}
-              onClick={() => setSelectedCategory(category.id)}
-              className={`flex items-center space-x-2 px-4 py-2 rounded-full whitespace-nowrap transition-all ${
-                selectedCategory === category.id
-                  ? 'bg-purple-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              <span>{category.icon}</span>
-              <span className="font-medium">{category.label}</span>
-            </button>
-          ))}
-        </div>
+    {/* Search Bar */}
+    <div className="mx-4">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+        <input
+          type="text"
+          placeholder="Search products..."
+          className="w-full pl-10 pr-4 py-3 bg-white rounded-2xl border border-gray-200 focus:border-purple-500 focus:outline-none"
+        />
+        <Filter className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
       </div>
+    </div>
 
-      {/* Products Grid */}
-      <div className="mx-4 grid grid-cols-2 gap-4">
-        {filteredMarketplace.map((item) => (
-          <div key={item.id} className="bg-white rounded-2xl p-4 shadow-lg hover:shadow-xl transition-all">
-            <div className="text-4xl mb-3 text-center">{item.image}</div>
-            <h3 className="font-bold text-gray-800 mb-1 text-sm">{item.name}</h3>
-            <p className="text-xs text-gray-500 mb-2">{item.seller}</p>
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center space-x-1">
-                <Star size={12} className="text-yellow-400 fill-current" />
-                <span className="text-xs text-gray-600">{item.rating}</span>
-              </div>
-              <span className="text-xs text-gray-500">{item.sales} sold</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-purple-600">{item.price}π</span>
-              <button className="bg-purple-600 text-white px-3 py-1 rounded-lg text-xs font-medium hover:bg-purple-700 transition-all">
-                Buy Now
-              </button>
-            </div>
-          </div>
+    {/* Categories */}
+    <div className="mx-4">
+      <div className="flex space-x-3 overflow-x-auto pb-2">
+        {[
+          { id: 'all', label: 'All', icon: '🛍️' },
+          { id: 'clothing', label: 'Clothing', icon: '👕' },
+          { id: 'electronics', label: 'Electronics', icon: '📱' },
+          { id: 'vehicles', label: 'Vehicles', icon: '🚗' },
+          { id: 'food', label: 'Food', icon: '🍕' }
+        ].map((category) => (
+          <button
+            key={category.id}
+            onClick={() => setSelectedCategory(category.id)}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-full whitespace-nowrap transition-all ${
+              selectedCategory === category.id
+                ? 'bg-purple-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            <span>{category.icon}</span>
+            <span className="font-medium">{category.label}</span>
+          </button>
         ))}
       </div>
     </div>
-  );
+
+    {/* Products Grid */}
+    <div className="mx-4 grid grid-cols-2 gap-4">
+      {filteredMarketplace.map((item) => (
+        <div key={item.id} className="bg-white rounded-2xl p-4 shadow-lg hover:shadow-xl transition-all">
+          <div className="text-4xl mb-3 text-center">{item.image}</div>
+          <h3 className="font-bold text-gray-800 mb-1 text-sm">{item.name}</h3>
+          <p className="text-xs text-gray-500 mb-2">{item.seller}</p>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center space-x-1">
+              <Star size={12} className="text-yellow-400 fill-current" />
+              <span className="text-xs text-gray-600">{item.rating}</span>
+            </div>
+            <span className="text-xs text-gray-500">{item.sales} sold</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-purple-600">{item.price}π</span>
+            <button
+              onClick={async () => {
+                try {
+                  const payment = await Pi.createPayment({
+                    amount: item.price.toString(),
+                    memo: `Marketplace: ${item.name}`,
+                    metadata: { productId: item.id }
+                  });
+
+                  const { txid } = await fetch('/payments/approve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ paymentId: payment.identifier })
+                  }).then(r => r.json());
+
+                  await Pi.submitPayment(payment);
+                  await Pi.completePayment(payment.identifier, txid);
+                  alert(`✅ Paid ${item.price} π for ${item.name}`);
+                } catch (err) {
+                  alert('Payment failed');
+                }
+              }}
+              className="bg-purple-600 text-white px-3 py-1 rounded-lg text-xs font-medium hover:bg-purple-700 transition-all"
+            >
+              Buy Now
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+);
 
   const renderPiLearn = () => (
     <div className="space-y-4">
