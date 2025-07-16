@@ -10,6 +10,14 @@ import {
 
 import WePiLogo from './components/WePiLogo';
 
+if (window?.Pi) {
+  window.Pi.init({
+    version: '2.0',
+    sandbox: true, // Set to false when going live
+  });
+}
+
+
 // Game configuration for PI Network
 const MAX_PLAYERS_PER_ROUND = 30;
 const GAS_FEES = {
