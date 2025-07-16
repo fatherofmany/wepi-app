@@ -17,16 +17,6 @@ if (window?.Pi) {
   });
 }
 
- const scopes = ['payments', 'username'];
-  function onIncompletePaymentFound(p) {
-    // auto-retry or cancel unfinished payments
-    console.log('incomplete:', p);
-  }
-
-  
-  Pi.authenticate(scopes, onIncompletePaymentFound)
-    .then(auth => console.log('✅ Ready, accessToken:', auth.accessToken))
-    .catch(err => console.error(err));
 
 
 // Game configuration for PI Network
@@ -1214,6 +1204,24 @@ const WePiApp = () => {
     );
   };
 
+const handlePiLogin = async () => {
+  if (!window?.Pi) {
+    alert("Pi SDK not available. Open this app in Pi Browser.");
+    return;
+  }
+
+  try {
+    const scopes = ['username', 'payments'];
+    const result = await window.Pi.authenticate(scopes);
+
+    alert(`Welcome, ${result.user.username}! You're now connected.`);
+    // Optionally: setPiUser(result.user); // if you want to store user info
+  } catch (error) {
+    alert("Login failed or cancelled.");
+    console.error(error);
+  }
+};
+
 
   const filteredMarketplace = selectedCategory === 'all' 
     ? marketplaceItems 
@@ -1632,6 +1640,14 @@ const renderProfile = () => (
           🧑🏽‍💻
         </div>
         <h2 className="mt-4 text-xl font-bold text-gray-800">Sanjo Komolafe</h2>
+        
+        <button
+  onClick={handlePiLogin}
+  className="mb-4 bg-purple-600 text-white px-4 py-2 rounded-xl hover:bg-purple-700 transition"
+>
+  🔐 Connect Wallet
+</button>
+
         <p className="text-gray-500 text-sm">wepiuser@domain.com</p>
       </div>
 
