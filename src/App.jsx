@@ -51,46 +51,6 @@ const Splash = ({ onDone }) => {
   );
 };
 
-if (window?.Pi) {
-  window.Pi.init({
-    version: '2.0',
-    sandbox: true, // Set to false when going live
-  });
-}
-
- const scopes = ['payments', 'username'];
-  function onIncompletePaymentFound(p) {
-    // auto-retry or cancel unfinished payments
-    console.log('incomplete:', p);
-  }
-  Pi.authenticate(scopes, onIncompletePaymentFound)
-    .then(auth => console.log('✅ Ready, accessToken:', auth.accessToken))
-    .catch(err => console.error(err));
-
-    async function payPi(amount, memo = 'WePi purchase', metadata = {}) {
-  try {
-    const payment = await Pi.createPayment({
-      amount: amount.toString(),
-      memo,
-      metadata
-    });
-    // 1) Ask your backend to approve
-    const { txid } = await fetch('/payments/approve', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paymentId: payment.identifier })
-    }).then(r => r.json());
-
-    // 2) Complete the payment
-    await Pi.submitPayment(payment);
-    await Pi.completePayment(payment.identifier, txid);
-    return txid;
-  } catch (err) {
-    console.error(err);
-    throw err;
-  }
-}
-
 
 // Game configuration for PI Network
 const MAX_PLAYERS_PER_ROUND = 30;
@@ -711,16 +671,6 @@ const WEPIGames = ({ onBack, userAddress, piBalance, setPiBalance }) => {
   );
 }
 
-function App() {
-  useEffect(() => {
-    if (window.Pi) {
-      window.Pi.init({
-        version: '2.0',
-        sandbox: true
-      });
-    }
-  }, []);
-}
 
 // PiLot Component
 const PiLotComponent = ({ onBack, piBalance, setPiBalance }) => {
@@ -1248,10 +1198,64 @@ const handleTripStart = async () => {
 // Main WePi App
 const WePiApp = () => {
   const [currentView, setCurrentView] = useState('home');
+  const [showSplash, setShowSplash] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [piBalance, setPiBalance] = useState(3.2746);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('all');
- const [userAddress, setUserAddress] = useState('0x1234567890abcdef');
+  const [userAddress, setUserAddress] = useState('0x1234567890abcdef');
+
+  useEffect(() => {
+  if (window?.Pi) {
+    window.Pi.init({ version: '2.0', sandbox: true });
+
+    const scopes = ['username', 'payments'];
+    function onIncompletePaymentFound(p) {
+      console.log('🟡 Incomplete payment found:', p);
+    }
+
+    window.Pi.authenticate(scopes, onIncompletePaymentFound)
+      .then(auth => {
+        console.log('✅ Auth success', auth);
+        setUserAddress(auth.user.username); // <— Save Pi username as address
+      })
+      .catch(err => {
+        console.error('❌ Auth failed:', err);
+      });
+  }
+}, []);
+
+const payPi = async (amount, memo = "WePi Purchase", metadata = {}) => {
+  if (!window?.Pi) {
+    alert("⚠️ Pi SDK unavailable – please open this app in Pi Browser.");
+    return;
+  }
+
+  try {
+    // Step 1: Create the payment
+    const payment = await window.Pi.createPayment({
+      amount: amount.toString(),
+      memo,
+      metadata,
+    });
+
+    // Step 2: Server Approval (replace this with real API later)
+    const txid = `mock-txid-${Date.now()}`;
+
+    // Step 3: Submit payment via Pi Network
+    await window.Pi.submitPayment(payment);
+
+    // Step 4: Complete the transaction with mock txid
+    await window.Pi.completePayment(payment.identifier, txid);
+
+    alert(`✅ Payment complete!\nTxID: ${txid}`);
+    return txid;
+  } catch (err) {
+    console.error("💥 Pi Payment Failed:", err);
+    alert("❌ Payment was cancelled or failed.");
+  }
+};
+
 
   // Sample data
   const recentActivity = [
@@ -1729,80 +1733,87 @@ const renderProfile = () => (
     </div>
   </div>
 );
-  return (
-    <div className="max-w-md mx-auto bg-gray-50 min-h-screen">
-      {/* Main Content */}
-      <div className="pb-20">
-        {currentView === 'home' && renderHome()}
-        {currentView === 'marketplace' && renderMarketplace()}
-        {currentView === 'pilearn' && renderPiLearn()}
-        {currentView === 'tasks' && renderTasks()}
-        {currentView === 'bills' && renderBills()}
-        {currentView === 'wallet' && renderWallet()}
-        {currentView === 'profile' && renderProfile()}
-        {currentView === 'games' && 
-  <WEPIGames 
-    onBack={() => setCurrentView('home')}
-    piBalance={piBalance}
-    setPiBalance={setPiBalance}
-    userAddress={userAddress}
-    setUserAddress={setUserAddress}
-  />}
-        {currentView === 'pilot' && (
-  <PiLotComponent 
-    onBack={() => setCurrentView('home')}
-    piBalance={piBalance}
-    setPiBalance={setPiBalance}
-  />
-)}
-      </div>
+ return (
+  <>
+    {showSplash && <Splash onDone={() => setShowSplash(false)} />}
 
-      {/* Bottom Navigation */}
-      <div className="fixed bottom-0 left-1/2 transform -translate-x-1/2 w-full max-w-md">
-        <div className="bg-gradient-to-r from-purple-600 to-purple-800 p-4 rounded-t-3xl shadow-2xl">
-          <div className="flex justify-around">
-            
-            <NavButton
-              icon={Home}
-              label="Home"
-              isActive={currentView === 'home'}
-              onClick={() => setCurrentView('home')}
+    {!showSplash && (
+      <div className="max-w-md mx-auto bg-gray-50 min-h-screen">
+        <div className="pb-20">
+          {/* Main Content Views */}
+          {currentView === 'home' && renderHome()}
+          {currentView === 'marketplace' && renderMarketplace()}
+          {currentView === 'pilearn' && renderPiLearn()}
+          {currentView === 'tasks' && renderTasks()}
+          {currentView === 'bills' && renderBills()}
+          {currentView === 'wallet' && renderWallet()}
+          {currentView === 'profile' && renderProfile()}
+          {currentView === 'games' && 
+            <WEPIGames 
+              onBack={() => setCurrentView('home')}
+              piBalance={piBalance}
+              setPiBalance={setPiBalance}
+              userAddress={userAddress}
+              setUserAddress={setUserAddress}
+            />}
+          {currentView === 'pilot' && (
+            <PiLotComponent 
+              onBack={() => setCurrentView('home')}
+              piBalance={piBalance}
+              setPiBalance={setPiBalance}
             />
-            <NavButton
-              icon={ShoppingBag}
-              label="Market"
-              isActive={currentView === 'marketplace'}
-              onClick={() => setCurrentView('marketplace')}
+          )}
+        </div>
+
+        {/* Bottom Navigation */}
+        <div className="fixed bottom-0 left-1/2 transform -translate-x-1/2 w-full max-w-md">
+          <div className="bg-gradient-to-r from-purple-600 to-purple-800 p-4 rounded-t-3xl shadow-2xl">
+            <div className="flex justify-around">
+              <NavButton
+                icon={Home}
+                label="Home"
+                isActive={currentView === 'home'}
+                onClick={() => setCurrentView('home')}
               />
-                     <NavButton
-  icon={Navigation}
-  label="PiLot"
-  isActive={currentView === 'pilot'}
-  onClick={() => setCurrentView('pilot')}
-            />
-            <NavButton
-  icon={Wallet}
-  label="Wallet"
-  isActive={currentView === 'wallet'}
-  onClick={() => setCurrentView('wallet')}
-/>
-<NavButton
-  icon={Gift}
-  label="Games"
-  isActive={currentView === 'games'}
-  onClick={() => setCurrentView('games')}
-/>
-<NavButton
-  icon={User}
-  label="Profile"
-  isActive={currentView === 'profile'}
-  onClick={() => setCurrentView('profile')}
-/>
+              <NavButton
+                icon={ShoppingBag}
+                label="Market"
+                isActive={currentView === 'marketplace'}
+                onClick={() => setCurrentView('marketplace')}
+              />
+              <NavButton
+                icon={Navigation}
+                label="PiLot"
+                isActive={currentView === 'pilot'}
+                onClick={() => setCurrentView('pilot')}
+              />
+              <NavButton
+                icon={Wallet}
+                label="Wallet"
+                isActive={currentView === 'wallet'}
+                onClick={() => setCurrentView('wallet')}
+              />
+              <NavButton
+                icon={Gift}
+                label="Games"
+                isActive={currentView === 'games'}
+                onClick={() => setCurrentView('games')}
+              />
+              <NavButton
+                icon={User}
+                label="Profile"
+                isActive={currentView === 'profile'}
+                onClick={() => setCurrentView('profile')}
+              />
             </div>
+          </div>
         </div>
       </div>
-    </div>
-  );
+    )}
+  </>
+);
+
 };
+
 
 export default WePiApp;
