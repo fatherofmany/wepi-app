@@ -1181,6 +1181,40 @@ const WePiApp = () => {
     { id: 4, title: 'Refer 3 Friends', reward: 2.50, time: '30 min', difficulty: 'Hard', category: 'Referral' }
   ];
 
+    const handlePiPayment = () => {
+    if (!window?.Pi) {
+      alert("Pi SDK not available. Please open in Pi Browser.");
+      return;
+    }
+
+    window.Pi.createPayment(
+      {
+        amount: 1.5,
+        memo: "WePi Test Purchase",
+        metadata: { item: "test-purchase", user: "pioneer" }
+      },
+      {
+        onReadyForServerApproval: (paymentId) => {
+          console.log("✅ Ready for approval:", paymentId);
+          alert(`Mock approval step\nPayment ID: ${paymentId}`);
+        },
+        onReadyForServerCompletion: (paymentId, txid) => {
+          console.log("✅ Completed:", paymentId, txid);
+          alert(`Payment complete!\nTxID: ${txid}`);
+        },
+        onCancel: (paymentId) => {
+          console.log("❌ Cancelled:", paymentId);
+          alert("User cancelled the payment.");
+        },
+        onError: (err, payment) => {
+          console.error("💥 Payment Error:", err);
+          alert("An error occurred.");
+        }
+      }
+    );
+  };
+
+
   const filteredMarketplace = selectedCategory === 'all' 
     ? marketplaceItems 
     : marketplaceItems.filter(item => item.category === selectedCategory);
@@ -1320,73 +1354,87 @@ const WePiApp = () => {
   );
 
   const renderMarketplace = () => (
-    <div className="space-y-4">
-      <Header title="Marketplace" showBack />
-      
-      {/* Search Bar */}
-      <div className="mx-4">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-          <input
-            type="text"
-            placeholder="Search products..."
-            className="w-full pl-10 pr-4 py-3 bg-white rounded-2xl border border-gray-200 focus:border-purple-500 focus:outline-none"
-          />
-          <Filter className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-        </div>
-      </div>
+  <div className="space-y-6 pb-8">
+    <Header title="Marketplace" showBack />
 
-      {/* Categories */}
-      <div className="mx-4">
-        <div className="flex space-x-3 overflow-x-auto pb-2">
-          {[
-            { id: 'all', label: 'All', icon: '🛍️' },
-            { id: 'clothing', label: 'Clothing', icon: '👕' },
-            { id: 'electronics', label: 'Electronics', icon: '📱' },
-            { id: 'vehicles', label: 'Vehicles', icon: '🚗' },
-            { id: 'food', label: 'Food', icon: '🍕' }
-          ].map((category) => (
-            <button
-              key={category.id}
-              onClick={() => setSelectedCategory(category.id)}
-              className={`flex items-center space-x-2 px-4 py-2 rounded-full whitespace-nowrap transition-all ${
-                selectedCategory === category.id
-                  ? 'bg-purple-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              <span>{category.icon}</span>
-              <span className="font-medium">{category.label}</span>
-            </button>
-          ))}
-        </div>
+    {/* Search Bar */}
+    <div className="mx-4">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+        <input
+          type="text"
+          placeholder="Search products..."
+          className="w-full pl-10 pr-4 py-3 bg-white rounded-2xl border border-gray-200 focus:border-purple-500 focus:outline-none"
+        />
+        <Filter className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
       </div>
+    </div>
 
-      {/* Products Grid */}
-      <div className="mx-4 grid grid-cols-2 gap-4">
-        {filteredMarketplace.map((item) => (
-          <div key={item.id} className="bg-white rounded-2xl p-4 shadow-lg hover:shadow-xl transition-all">
-            <div className="text-4xl mb-3 text-center">{item.image}</div>
-            <h3 className="font-bold text-gray-800 mb-1 text-sm">{item.name}</h3>
-            <p className="text-xs text-gray-500 mb-2">{item.seller}</p>
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center space-x-1">
-                <Star size={12} className="text-yellow-400 fill-current" />
-                <span className="text-xs text-gray-600">{item.rating}</span>
-              </div>
-              <span className="text-xs text-gray-500">{item.sales} sold</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-purple-600">{item.price}π</span>
-              <button className="bg-purple-600 text-white px-3 py-1 rounded-lg text-xs font-medium hover:bg-purple-700 transition-all">
-                Buy Now
-              </button>
-            </div>
-          </div>
+    {/* Categories */}
+    <div className="mx-4">
+      <div className="flex space-x-3 overflow-x-auto pb-2">
+        {[
+          { id: 'all', label: 'All', icon: '🛍️' },
+          { id: 'clothing', label: 'Clothing', icon: '👕' },
+          { id: 'electronics', label: 'Electronics', icon: '📱' },
+          { id: 'vehicles', label: 'Vehicles', icon: '🚗' },
+          { id: 'food', label: 'Food', icon: '🍕' }
+        ].map((category) => (
+          <button
+            key={category.id}
+            onClick={() => setSelectedCategory(category.id)}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-full whitespace-nowrap transition-all ${
+              selectedCategory === category.id
+                ? 'bg-purple-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            <span>{category.icon}</span>
+            <span className="font-medium">{category.label}</span>
+          </button>
         ))}
       </div>
     </div>
-  );
+
+    {/* Products Grid */}
+    <div className="mx-4 grid grid-cols-2 gap-4">
+      {filteredMarketplace.map((item) => (
+        <div key={item.id} className="bg-white rounded-2xl p-4 shadow-lg hover:shadow-xl transition-all">
+          <div className="text-4xl mb-3 text-center">{item.image}</div>
+          <h3 className="font-bold text-gray-800 mb-1 text-sm">{item.name}</h3>
+          <p className="text-xs text-gray-500 mb-2">{item.seller}</p>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center space-x-1">
+              <Star size={12} className="text-yellow-400 fill-current" />
+              <span className="text-xs text-gray-600">{item.rating}</span>
+            </div>
+            <span className="text-xs text-gray-500">{item.sales} sold</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-purple-600">{item.price}π</span>
+            <button
+              onClick={() => handleBuyNow(item)}  // make sure this function exists!
+              className="bg-purple-600 text-white px-3 py-1 rounded-lg text-xs font-medium hover:bg-purple-700 transition-all"
+            >
+              Buy Now
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+
+    {/* Manual Pi Payment Test Button */}
+    <div className="mx-4 mt-6 text-center">
+      <button
+        onClick={handlePiPayment} // must be defined at top-level
+        className="bg-orange-500 text-white px-6 py-3 rounded-xl hover:bg-orange-600 transition-all text-sm font-semibold"
+      >
+        🔐 Test Pi Payment
+      </button>
+    </div>
+  </div>
+);
+
 
   const renderPiLearn = () => (
     <div className="space-y-4">
