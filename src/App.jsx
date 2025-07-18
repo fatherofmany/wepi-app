@@ -1183,39 +1183,63 @@ const WePiApp = () => {
   }
 }, []);
 
-async function payPi(amount, memo, extra = {}) {
+const payPi = async (amount, memo = 'WePi purchase', metadata = {}) => {
+  if (!window?.Pi) {
+    alert("Pi SDK not available. Please open this app in Pi Browser.");
+    return null;
+  }
+
   return new Promise((resolve, reject) => {
-    Pi.createPayment(
-      {
-        amount: amount.toString(),
-        memo,
-        metadata: extra
-      },
-      {
-        // ①  backend approves
-        onReadyForServerApproval: async paymentId => {
-          await fetch('/payments/approve', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ paymentId })
-          });
+    try {
+      const paymentCallbacks = {
+        onReadyForServerApproval: async (paymentId) => {
+          try {
+            const response = await fetch("https://wepi-backend-production.up.railway.app/payments/approve", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ paymentId }),
+            });
+
+            const data = await response.json();
+            await window.Pi.submitPayment({ identifier: paymentId });
+            await window.Pi.completePayment(paymentId, data.txid);
+
+            alert(`✅ Payment completed! TxID: ${data.txid}`);
+            resolve(data.txid);
+          } catch (err) {
+            console.error("💥 Approval or Completion error:", err);
+            alert("Payment failed at approval stage.");
+            reject(null);
+          }
         },
-        // ②  backend completes
-        onReadyForServerCompletion: async (paymentId, txid) => {
-          await fetch('/payments/complete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ paymentId, txid })
-          });
+        onCancel: (paymentId) => {
+          console.log("❌ Payment cancelled:", paymentId);
+          alert("User cancelled the payment.");
+          reject(null);
         },
-        onCancel: () => reject('user-cancelled'),
-        onError: reject
-      }
-    )
-      .then(resolve)
-      .catch(reject);
+        onError: (err) => {
+          console.error("💥 Pi SDK error:", err);
+          alert("Payment failed.");
+          reject(null);
+        },
+      };
+
+      window.Pi.createPayment(
+        {
+          amount: amount.toString(),
+          memo,
+          metadata,
+        },
+        paymentCallbacks
+      );
+    } catch (err) {
+      console.error("💥 Payment setup failed:", err);
+      alert("Unable to initiate payment.");
+      reject(null);
+    }
   });
-}
+};
+
 
   // Sample data
   const recentActivity = [
