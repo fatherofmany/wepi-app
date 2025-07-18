@@ -739,33 +739,36 @@ const PiLotComponent = ({ onBack, piBalance, setPiBalance }) => {
 // 4c) PiLot ride booking – Pi Testnet-ready
 // --------------------------------------------
 const handleTripStart = async () => {
-  const vehiclePrice = vehicleTypes.find(v => v.id === selectedVehicle).price;
+  const vehicle = vehicleTypes.find(v => v.id === selectedVehicle);
+  const vehiclePrice = vehicle?.price;
+
+  if (!vehicle || !vehiclePrice) {
+    alert("Please select a valid vehicle.");
+    return;
+  }
 
   try {
-    // 1) create + approve + submit + complete
-    const payment = await Pi.createPayment({
-      amount: vehiclePrice.toString(),
-      memo: 'PiLot ride',
-      metadata: { vehicle: selectedVehicle }
+    // ✅ Centralized Pi payment
+    const txid = await payPi(vehiclePrice, "PiLot ride", {
+      vehicle: selectedVehicle,
+      type: vehicle.name || "vehicle",
+      user: userAddress // if available
     });
 
-    const { txid } = await fetch('/payments/approve', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paymentId: payment.identifier })
-    }).then(r => r.json());
+    if (!txid) {
+      alert("Payment was cancelled or failed.");
+      return;
+    }
 
-    await Pi.submitPayment(payment);
-    await Pi.completePayment(payment.identifier, txid);
-
-    // 2) only after success → update UI balance
+    // ✅ Update balance and move to next step
     setPiBalance(prev => prev - vehiclePrice);
-    setCurrentStep('trip');
+    setCurrentStep("trip");
   } catch (err) {
-    alert('Payment failed');
-    console.error(err);
+    console.error("Trip start error:", err);
+    alert("Something went wrong. Try again.");
   }
 };
+
 
   const renderBookingInterface = () => (
     <div className="space-y-6">
@@ -1180,36 +1183,39 @@ const WePiApp = () => {
   }
 }, []);
 
-const payPi = async (amount, memo = 'WePi purchase', metadata = {}) => {
-  if (!window?.Pi) {
-    alert("Pi SDK not available. Please open this app in Pi Browser.");
-    return;
-  }
-
-  try {
-    const payment = await window.Pi.createPayment({
-      amount: amount.toString(),
-      memo,
-      metadata,
-    });
-
-    const response = await fetch("https://wepi-backend-production.up.railway.app/payments/approve", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ paymentId: payment.identifier }),
-    });
-
-    const data = await response.json();
-
-    await window.Pi.submitPayment(payment);
-    await window.Pi.completePayment(payment.identifier, data.txid);
-
-    alert(`✅ Payment completed! TxID: ${data.txid}`);
-  } catch (error) {
-    console.error("💥 Payment error:", error);
-    alert("Payment failed.");
-  }
-};
+async function payPi(amount, memo, extra = {}) {
+  return new Promise((resolve, reject) => {
+    Pi.createPayment(
+      {
+        amount: amount.toString(),
+        memo,
+        metadata: extra
+      },
+      {
+        // ①  backend approves
+        onReadyForServerApproval: async paymentId => {
+          await fetch('/payments/approve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paymentId })
+          });
+        },
+        // ②  backend completes
+        onReadyForServerCompletion: async (paymentId, txid) => {
+          await fetch('/payments/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paymentId, txid })
+          });
+        },
+        onCancel: () => reject('user-cancelled'),
+        onError: reject
+      }
+    )
+      .then(resolve)
+      .catch(reject);
+  });
+}
 
   // Sample data
   const recentActivity = [
@@ -1242,43 +1248,36 @@ const payPi = async (amount, memo = 'WePi purchase', metadata = {}) => {
     { id: 4, title: 'Refer 3 Friends', reward: 2.50, time: '30 min', difficulty: 'Hard', category: 'Referral' }
   ];
 
-  const handleBuyNow = (item) => {
-  alert(`Simulated checkout:\n${item.name} for ${item.price}π`);
-  setPiBalance(prev => Math.max(0, prev - item.price));
-};
+// const handlePiPayment = () => {
+//   if (!window?.Pi) {
+//     alert("Pi SDK not available. Please open in Pi Browser.");
+//     return;
+//   }
 
-  const handlePiPayment = () => {
-    if (!window?.Pi) {
-      alert("Pi SDK not available. Please open in Pi Browser.");
-      return;
-    }
-
-    window.Pi.createPayment(
-      {
-        amount: 1.5,
-        memo: "WePi Test Purchase",
-        metadata: { item: "test-purchase", user: "pioneer" }
-      },
-      {
-        onReadyForServerApproval: (paymentId) => {
-          console.log("✅ Ready for approval:", paymentId);
-          alert(`Mock approval step\nPayment ID: ${paymentId}`);
-        },
-        onReadyForServerCompletion: (paymentId, txid) => {
-          console.log("✅ Completed:", paymentId, txid);
-          alert(`Payment complete!\nTxID: ${txid}`);
-        },
-        onCancel: (paymentId) => {
-          console.log("❌ Cancelled:", paymentId);
-          alert("User cancelled the payment.");
-        },
-        onError: (err, payment) => {
-          console.error("💥 Payment Error:", err);
-          alert("An error occurred.");
-        }
-      }
-    );
-  };
+//   window.Pi.createPayment(
+//     {
+//       amount: 1.5,
+//       memo: "WePi Test Purchase",
+//       metadata: { item: "test-purchase", user: "pioneer" }
+//     },
+//     {
+//       onReadyForServerApproval: (paymentId) => {
+//         console.log("✅ Ready for approval:", paymentId);
+//         alert(`Mock approval step\nPayment ID: ${paymentId}`);
+//       },
+//       onReadyForServerCompletion: (paymentId, txid) => {
+//         console.log("✅ Completed:", paymentId, txid);
+//         alert(`Payment complete!\nTxID: ${txid}`);
+//       },
+//       onCancel: () => {
+//         alert("User cancelled the payment.");
+//       },
+//       onError: () => {
+//         alert("An error occurred.");
+//       }
+//     }
+//   );
+// };
 
   const filteredMarketplace = selectedCategory === 'all' 
     ? marketplaceItems 
