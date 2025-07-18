@@ -17,7 +17,7 @@ const Splash = ({ onDone }) => {
   const [visible, setVisible] = React.useState(true);
 
   React.useEffect(() => {
-    const t = setTimeout(() => setVisible(false), 1500);
+    const t = setTimeout(() => setVisible(false), 2500);
     return () => clearTimeout(t);
   }, []);
 
@@ -103,7 +103,7 @@ const Confetti = ({ active }) => {
 };
 
 // Lucky Wheel Component
-const LuckyWheel = ({ userAddress, piBalance, onWin, onSpend }) => {
+const LuckyWheel = ({ userAddress, piBalance, onWin, onSpend, payPi }) => {
   const [rotation, setRotation] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false);
   const [selectedPrize, setSelectedPrize] = useState(null);
@@ -119,23 +119,21 @@ const LuckyWheel = ({ userAddress, piBalance, onWin, onSpend }) => {
     setIsSpinning(true);
     setSelectedPrize(null);
 
-    // REAL TESTNET PAYMENT
-    const payment = await Pi.createPayment({
-      amount: spinCost.toString(),
-      memo: 'LuckyWheel spin',
-      metadata: { game: 'wheel', cost: spinCost }
+    // ✅ Call central payPi function
+    const txId = await payPi(spinCost, 'LuckyWheel spin', {
+      game: 'wheel',
+      cost: spinCost,
+      user: userAddress
     });
-    const { txid } = await fetch('/payments/approve', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paymentId: payment.identifier })
-    }).then(r => r.json());
 
-    await Pi.submitPayment(payment);
-    await Pi.completePayment(payment.identifier, txid);
-    onSpend(spinCost); // update local balance after success
+    if (!txId) {
+      setIsSpinning(false);
+      return;
+    }
 
-    // Simulate wheel spin with random selection
+    onSpend(spinCost); // Deduct after successful payment
+
+    // 🎯 Simulate wheel spin
     const totalRotations = 5 + Math.random() * 5;
     const finalRotation = rotation + totalRotations * 360;
 
@@ -177,18 +175,6 @@ const LuckyWheel = ({ userAddress, piBalance, onWin, onSpend }) => {
   }
 };
 
-  const claimWinnings = async () => {
-    if (!claimableWinnings) return;
-    
-    try {
-      // Add winnings to balance (in real app, this would be handled by backend)
-      onWin(claimableWinnings.amount);
-      setClaimableWinnings(null);
-      
-    } catch (error) {
-      console.error('Claim failed:', error);
-    }
-  };
 
   return (
     <div className="flex flex-col items-center space-y-6">
@@ -368,7 +354,7 @@ const LuckyWheel = ({ userAddress, piBalance, onWin, onSpend }) => {
 };
 
 // Lottery Component
-const Lottery = ({ userAddress, piBalance, onWin, onSpend }) => {
+const Lottery = ({ userAddress, piBalance, onWin, onSpend, payPi }) => {
   const [players, setPlayers] = useState([]);
   const [winner, setWinner] = useState("");
   const [loading, setLoading] = useState(false);
@@ -396,21 +382,20 @@ const Lottery = ({ userAddress, piBalance, onWin, onSpend }) => {
   try {
     setLoading(true);
 
-    // REAL TESTNET PAYMENT
-    const payment = await Pi.createPayment({
-      amount: entryCost.toString(),
-      memo: 'Lottery entry',
-      metadata: { game: 'lottery', cost: entryCost }
+    // ✅ Use centralized payPi function
+    const txId = await payPi(entryCost, "Lottery entry", {
+      game: "lottery",
+      round: currentRound,
+      user: userAddress
     });
-    const { txid } = await fetch('/payments/approve', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paymentId: payment.identifier })
-    }).then(r => r.json());
 
-    await Pi.submitPayment(payment);
-    await Pi.completePayment(payment.identifier, txid);
-    onSpend(entryCost); // update local balance
+    if (!txId) {
+      alert("Payment failed or cancelled.");
+      setLoading(false);
+      return;
+    }
+
+    onSpend(entryCost);
 
     const newPlayer = {
       address: userAddress,
@@ -423,44 +408,12 @@ const Lottery = ({ userAddress, piBalance, onWin, onSpend }) => {
     }
   } catch (err) {
     console.error("Entry failed:", err);
+    alert("Entry failed. Try again.");
   } finally {
     setLoading(false);
   }
 };
 
-const pickWinner = async () => {
-  if (players.length === 0) return;
-
-  try {
-    setLoading(true);
-    setLotteryState("drawing");
-
-    // Simulate random winner selection
-    const winnerIndex = Math.floor(Math.random() * players.length);
-    const winnerData = players[winnerIndex];
-
-    const prizePool = players.length * parseFloat(GAS_FEES.lottery) * 0.95;
-
-    setWinner(`🎉 Winner: ${winnerData.address.slice(0, 6)}...${winnerData.address.slice(-4)} won ${prizePool.toFixed(2)} π!`);
-    setLotteryState("ended");
-
-    if (winnerData.address === userAddress) {
-      onWin(prizePool);
-    }
-
-    setTimeout(() => {
-      setPlayers([]);
-      setWinner("");
-      setCurrentRound(prev => prev + 1);
-      setLotteryState("open");
-    }, 5000);
-  } catch (err) {
-    console.error("Draw failed:", err);
-    setLotteryState("open");
-  } finally {
-    setLoading(false);
-  }
-};
 
   return (
     <div className="space-y-6">
@@ -577,7 +530,7 @@ const pickWinner = async () => {
 };
 
 // Main Games Component
-const WEPIGames = ({ onBack, userAddress, piBalance, setPiBalance }) => {
+const WEPIGames = ({ onBack, userAddress, piBalance, setPiBalance, setUserAddress, payPi }) => {
   const [activeGame, setActiveGame] = useState("lottery");
   const [showConfetti, setShowConfetti] = useState(false);
 
@@ -591,19 +544,18 @@ const WEPIGames = ({ onBack, userAddress, piBalance, setPiBalance }) => {
     setPiBalance(prev => Math.max(0, prev - amount));
   };
 
-
   return (
     <div className="max-w-4xl mx-auto p-4">
       <Confetti active={showConfetti} />
-      
+
       {/* Header */}
       <div className="text-center mb-6">
         <h1 className="text-3xl font-bold mb-2">🎮 WEPI Games</h1>
         <p className="text-gray-400 mb-4">Powered by π Network</p>
-         <button onClick={onBack} className="p-1">
-            <ArrowRight className="rotate-180" size={20} />
-          </button>
-        
+        <button onClick={onBack} className="p-1">
+          <ArrowRight className="rotate-180" size={20} />
+        </button>
+
         {/* PI Balance */}
         <div className="bg-gradient-to-r from-yellow-500/20 to-orange-500/20 border border-yellow-500/30 rounded-xl p-4 inline-block">
           <div className="flex items-center space-x-2">
@@ -646,9 +598,10 @@ const WEPIGames = ({ onBack, userAddress, piBalance, setPiBalance }) => {
             piBalance={piBalance}
             onWin={handleWin}
             onSpend={handleSpend}
+            payPi={payPi} // ✅ Pass payPi
           />
         )}
-        
+
         {activeGame === "wheel" && (
           <div>
             <h2 className="text-2xl font-bold text-center mb-6">🎡 Lucky Wheel</h2>
@@ -657,6 +610,7 @@ const WEPIGames = ({ onBack, userAddress, piBalance, setPiBalance }) => {
               piBalance={piBalance}
               onWin={handleWin}
               onSpend={handleSpend}
+              payPi={payPi} // ✅ Pass payPi
             />
           </div>
         )}
@@ -669,7 +623,8 @@ const WEPIGames = ({ onBack, userAddress, piBalance, setPiBalance }) => {
       </div>
     </div>
   );
-}
+};
+
 
 
 // PiLot Component
@@ -1225,34 +1180,34 @@ const WePiApp = () => {
   }
 }, []);
 
-const payPi = async (amount, memo = "WePi Purchase", metadata = {}) => {
+const payPi = async (amount, memo = 'WePi purchase', metadata = {}) => {
   if (!window?.Pi) {
-    alert("⚠️ Pi SDK unavailable – please open this app in Pi Browser.");
+    alert("Pi SDK not available. Please open this app in Pi Browser.");
     return;
   }
 
   try {
-    // Step 1: Create the payment
     const payment = await window.Pi.createPayment({
       amount: amount.toString(),
       memo,
       metadata,
     });
 
-    // Step 2: Server Approval (replace this with real API later)
-    const txid = `mock-txid-${Date.now()}`;
+    const response = await fetch("https://wepi-backend-production.up.railway.app/payments/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paymentId: payment.identifier }),
+    });
 
-    // Step 3: Submit payment via Pi Network
+    const data = await response.json();
+
     await window.Pi.submitPayment(payment);
+    await window.Pi.completePayment(payment.identifier, data.txid);
 
-    // Step 4: Complete the transaction with mock txid
-    await window.Pi.completePayment(payment.identifier, txid);
-
-    alert(`✅ Payment complete!\nTxID: ${txid}`);
-    return txid;
-  } catch (err) {
-    console.error("💥 Pi Payment Failed:", err);
-    alert("❌ Payment was cancelled or failed.");
+    alert(`✅ Payment completed! TxID: ${data.txid}`);
+  } catch (error) {
+    console.error("💥 Payment error:", error);
+    alert("Payment failed.");
   }
 };
 
@@ -1506,61 +1461,33 @@ const payPi = async (amount, memo = "WePi Purchase", metadata = {}) => {
       </div>
     </div>
 
-    {/* Products Grid */}
-    <div className="mx-4 grid grid-cols-2 gap-4">
-      {filteredMarketplace.map((item) => (
-        <div key={item.id} className="bg-white rounded-2xl p-4 shadow-lg hover:shadow-xl transition-all">
-          <div className="text-4xl mb-3 text-center">{item.image}</div>
-          <h3 className="font-bold text-gray-800 mb-1 text-sm">{item.name}</h3>
-          <p className="text-xs text-gray-500 mb-2">{item.seller}</p>
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center space-x-1">
-              <Star size={12} className="text-yellow-400 fill-current" />
-              <span className="text-xs text-gray-600">{item.rating}</span>
-            </div>
-            <span className="text-xs text-gray-500">{item.sales} sold</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="font-bold text-purple-600">{item.price}π</span>
-            <button
-              onClick={async () => {
-                try {
-                  const payment = await Pi.createPayment({
-                    amount: item.price.toString(),
-                    memo: `Marketplace: ${item.name}`,
-                    metadata: { productId: item.id }
-                  });
-
-                  const { txid } = await fetch('/payments/approve', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ paymentId: payment.identifier })
-                  }).then(r => r.json());
-
-                  await Pi.submitPayment(payment);
-                  await Pi.completePayment(payment.identifier, txid);
-                  alert(`✅ Paid ${item.price} π for ${item.name}`);
-                } catch (err) {
-                  alert('Payment failed');
-                }
-              }}
-              className="bg-purple-600 text-white px-3 py-1 rounded-lg text-xs font-medium hover:bg-purple-700 transition-all"
-            >
-              Buy Now
-            </button>
-          </div>
+   {/* Products Grid */}
+<div className="mx-4 grid grid-cols-2 gap-4">
+  {filteredMarketplace.map((item) => (
+    <div key={item.id} className="bg-white rounded-2xl p-4 shadow-lg hover:shadow-xl transition-all">
+      <div className="text-4xl mb-3 text-center">{item.image}</div>
+      <h3 className="font-bold text-gray-800 mb-1 text-sm">{item.name}</h3>
+      <p className="text-xs text-gray-500 mb-2">{item.seller}</p>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center space-x-1">
+          <Star size={12} className="text-yellow-400 fill-current" />
+          <span className="text-xs text-gray-600">{item.rating}</span>
         </div>
-      ))}
+        <span className="text-xs text-gray-500">{item.sales} sold</span>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="font-bold text-purple-600">{item.price}π</span>
+        <button
+          className="bg-purple-600 text-white px-3 py-1 rounded-lg text-xs font-medium hover:bg-purple-700 transition-all"
+          onClick={() => payPi(item.price, "Buy Item", { itemId: item.id })}
+        >
+          Buy Now
+        </button>
+      </div>
     </div>
-    <div className="mt-6 text-center">
-  <button
-    onClick={handlePiPayment}
-    className="bg-orange-500 text-white px-6 py-3 rounded-xl hover:bg-orange-600 transition"
-  >
-    🔐 Test Pi Payment
-  </button>
-</div> 
-  </div>
+  ))}
+</div>
+</div>
 );
 
   const renderPiLearn = () => (
@@ -1800,6 +1727,7 @@ const renderProfile = () => (
               setPiBalance={setPiBalance}
               userAddress={userAddress}
               setUserAddress={setUserAddress}
+              payPi={payPi}
             />}
           {currentView === 'pilot' && (
             <PiLotComponent 
