@@ -1157,145 +1157,283 @@ const handleTripStart = async () => {
 const WePiApp = () => {
   const [currentView, setCurrentView] = useState('home');
   const [showSplash, setShowSplash] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [piBalance, setPiBalance] = useState(3.2746);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [userAddress, setUserAddress] = useState('0x1234567890abcdef');
+  const [piAuthenticated, setPiAuthenticated] = useState(false);
+  const [user, setUser] = useState(null);
+  const [accessToken, setAccessToken] = useState(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-  if (window?.Pi) {
-    window.Pi.init({ version: '2.0', sandbox: true });
+    const initializePi = async () => {
+      try {
+        if (window.Pi) {
+          await window.Pi.init({ 
+            version: "2.0",
+            sandbox: true // Set to false for production
+          });
+          console.log('Pi SDK initialized');
+        } else {
+          console.error('Pi SDK not available');
+        }
+      } catch (error) {
+        console.error('Pi SDK initialization error:', error);
+      }
+    };
 
-    const scopes = ['username', 'payments'];
-    function onIncompletePaymentFound(p) {
-      console.log('🟡 Incomplete payment found:', p);
+    initializePi();
+  }, []);
+
+  // Handle incomplete payments (required callback)
+  const onIncompletePaymentFound = (payment) => {
+    console.log('Incomplete payment found:', payment);
+    // Handle incomplete payment - you might want to complete it or show user
+    return payment.paymentId;
+  };
+
+  // Authenticate with Pi Network
+  const authenticateWithPi = async () => {
+    if (!window?.Pi) {
+      alert("Pi SDK not available. Please open this app in Pi Browser.");
+      return;
     }
 
-    window.Pi.authenticate(scopes, onIncompletePaymentFound)
-      .then(auth => {
-        console.log('✅ Auth success', auth);
-        setUserAddress(auth.user.username); // <— Save Pi username as address
-      })
-      .catch(err => {
-        console.error('❌ Auth failed:', err);
+    setLoading(true);
+    
+    try {
+      // Request both username and payments scopes
+      const scopes = ['username', 'payments'];
+      
+      const authResult = await window.Pi.authenticate(scopes, onIncompletePaymentFound);
+      
+      console.log('✅ Auth success', authResult);
+      
+      setUser(authResult.user);
+      setAccessToken(authResult.accessToken);
+      setPiAuthenticated(true);
+      
+      alert(`Welcome ${authResult.user.username}! You can now make payments.`);
+      
+    } catch (error) {
+      console.error('💥 Authentication error:', error);
+      alert(`Authentication failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Payment function (only works after authentication)
+  const payPi = async (amount, memo = 'WePi purchase', metadata = {}) => {
+    if (!window?.Pi) {
+      alert("Pi SDK not available. Please open this app in Pi Browser.");
+      return;
+    }
+
+    if (!piAuthenticated) {
+      alert("Please authenticate with Pi first to make payments.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      console.log('🚀 Starting Pi payment...', { amount, memo, metadata });
+
+      // Create payment with proper callback structure
+      const payment = await new Promise((resolve, reject) => {
+        const paymentData = {
+          amount: parseFloat(amount),
+          memo,
+          metadata: {
+            ...metadata,
+            userId: user?.uid || 'anonymous',
+            timestamp: new Date().toISOString()
+          },
+        };
+
+        const callbacks = {
+          onReadyForServerApproval: async function(paymentId) {
+            console.log('✅ Payment ready for approval:', paymentId);
+            
+            try {
+              const response = await fetch("https://wepi-backend-production.up.railway.app/payments/approve", {
+                method: "POST",
+                headers: { 
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${accessToken}` // Include access token
+                },
+                body: JSON.stringify({ 
+                  paymentId,
+                  userId: user?.uid,
+                  amount: paymentData.amount,
+                  memo: paymentData.memo
+                }),
+              });
+
+              if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+              }
+
+              const data = await response.json();
+              console.log('Server approval response:', data);
+              
+            } catch (error) {
+              console.error('Server approval failed:', error);
+              reject(new Error(`Server approval failed: ${error.message}`));
+            }
+          },
+
+          onReadyForServerCompletion: async function(paymentId, txid) {
+            console.log('✅ Payment ready for completion:', paymentId, txid);
+            
+            try {
+              const response = await fetch("https://wepi-backend-production.up.railway.app/payments/complete", {
+                method: "POST",
+                headers: { 
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${accessToken}`
+                },
+                body: JSON.stringify({ 
+                  paymentId, 
+                  txid,
+                  userId: user?.uid
+                }),
+              });
+
+              if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+              }
+
+              const data = await response.json();
+              console.log('Payment completion response:', data);
+              
+              alert(`✅ Payment completed! TxID: ${txid}`);
+              
+              resolve({
+                paymentId,
+                txid,
+                serverResponse: data,
+                status: 'completed'
+              });
+              
+            } catch (error) {
+              console.error('Payment completion failed:', error);
+              reject(new Error(`Payment completion failed: ${error.message}`));
+            }
+          },
+
+          onCancel: function(paymentId) {
+            console.log('❌ Payment cancelled:', paymentId);
+            alert('Payment was cancelled.');
+            reject(new Error('Payment cancelled by user'));
+          },
+
+          onError: function(error, payment) {
+            console.error('💥 Payment error:', error);
+            alert(`Payment failed: ${error.message || 'Unknown error'}`);
+            reject(error);
+          }
+        };
+
+        // Create the payment with callbacks
+        window.Pi.createPayment(paymentData, callbacks);
       });
-  }
-}, []);
 
-const payPi = async (amount, memo = 'WePi purchase', metadata = {}) => {
-  if (!window?.Pi) {
-    alert("Pi SDK not available. Please open this app in Pi Browser.");
-    return;
-  }
+      console.log('Payment process completed:', payment);
+      return payment;
 
-  try {
-    console.log('🚀 Starting Pi payment...', { amount, memo, metadata });
+    } catch (error) {
+      console.error("💥 Payment error:", error);
+      alert(`Payment failed: ${error.message}`);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    // Create payment with proper callback structure
-    const payment = await new Promise((resolve, reject) => {
-      const paymentData = {
-        amount: parseFloat(amount), // Pi SDK expects number, not string
-        memo,
-        metadata,
-      };
+  // Test payment function
+  const handleTestPayment = async () => {
+    try {
+      await payPi(1.0, 'Test payment', { productId: 'test-product' });
+    } catch (error) {
+      console.error('Test payment failed:', error);
+    }
+  };
 
-      const callbacks = {
-        // Called when payment is created and ready for server approval
-        onReadyForServerApproval: async function(paymentId) {
-          console.log('✅ Payment ready for approval:', paymentId);
+  return (
+    <div className="wepi-app" style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
+      <h1>WePi App</h1>
+      
+      {!piAuthenticated ? (
+        <div>
+          <p>Please authenticate with Pi Network to use this app.</p>
+          <button 
+            onClick={authenticateWithPi}
+            disabled={loading}
+            style={{
+              padding: '10px 20px',
+              fontSize: '16px',
+              backgroundColor: '#7B2CBF',
+              color: 'white',
+              border: 'none',
+              borderRadius: '5px',
+              cursor: loading ? 'not-allowed' : 'pointer'
+            }}
+          >
+            {loading ? 'Authenticating...' : 'Authenticate with Pi'}
+          </button>
+        </div>
+      ) : (
+        <div>
+          <h2>Welcome, {user?.username}!</h2>
+          <p>User ID: {user?.uid}</p>
+          <p>✅ Authentication successful - you can now make payments</p>
           
-          try {
-            // Call your backend to approve the payment
-            const response = await fetch("https://wepi-backend-production.up.railway.app/payments/approve", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ paymentId }),
-            });
-
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            const data = await response.json();
-            console.log('Server approval response:', data);
-            
-            // Resolve with payment info including server response
-            resolve({
-              paymentId,
-              serverResponse: data,
-              status: 'approved'
-            });
-            
-          } catch (error) {
-            console.error('Server approval failed:', error);
-            reject(new Error(`Server approval failed: ${error.message}`));
-          }
-        },
-
-        // Called when payment is ready for server completion
-        onReadyForServerCompletion: async function(paymentId, txid) {
-          console.log('✅ Payment ready for completion:', paymentId, txid);
+          <div style={{ marginTop: '20px' }}>
+            <h3>Test Payment</h3>
+            <button 
+              onClick={handleTestPayment}
+              disabled={loading}
+              style={{
+                padding: '10px 20px',
+                fontSize: '16px',
+                backgroundColor: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '5px',
+                cursor: loading ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {loading ? 'Processing...' : 'Pay 1 Pi (Test)'}
+            </button>
+          </div>
           
-          try {
-            // Call your backend to complete the payment
-            const response = await fetch("https://wepi-backend-production.up.railway.app/payments/complete", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ paymentId, txid }),
-            });
-
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            const data = await response.json();
-            console.log('Payment completion response:', data);
-            
-            alert(`✅ Payment completed! TxID: ${txid}`);
-            
-            // Resolve with final payment info
-            resolve({
-              paymentId,
-              txid,
-              serverResponse: data,
-              status: 'completed'
-            });
-            
-          } catch (error) {
-            console.error('Payment completion failed:', error);
-            reject(new Error(`Payment completion failed: ${error.message}`));
-          }
-        },
-
-        // Called when payment is cancelled by user
-        onCancel: function(paymentId) {
-          console.log('❌ Payment cancelled:', paymentId);
-          alert('Payment was cancelled.');
-          reject(new Error('Payment cancelled by user'));
-        },
-
-        // Called when there's an error
-        onError: function(error, payment) {
-          console.error('💥 Payment error:', error);
-          alert(`Payment failed: ${error.message || 'Unknown error'}`);
-          reject(error);
-        }
-      };
-
-      // Create the payment with callbacks
-      window.Pi.createPayment(paymentData, callbacks);
-    });
-
-    console.log('Payment process completed:', payment);
-    return payment;
-
-  } catch (error) {
-    console.error("💥 Payment error:", error);
-    alert(`Payment failed: ${error.message}`);
-    throw error;
-  }
-};
+          <div style={{ marginTop: '20px' }}>
+            <button 
+              onClick={() => {
+                setPiAuthenticated(false);
+                setUser(null);
+                setAccessToken(null);
+              }}
+              style={{
+                padding: '8px 16px',
+                fontSize: '14px',
+                backgroundColor: '#dc3545',
+                color: 'white',
+                border: 'none',
+                borderRadius: '5px',
+                cursor: 'pointer'
+              }}
+            >
+              Sign Out
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   // Sample data
   const recentActivity = [
