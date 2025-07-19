@@ -1337,44 +1337,118 @@ const WePiApp = () => {
   // Helper function to re-authenticate if needed
   const reAuthenticate = async () => {
     if (!window?.Pi) {
-      alert("Pi SDK not available");
+      alert("Pi SDK not available. Please make sure you're using Pi Browser.");
       return;
     }
 
     try {
       setLoading(true);
+      
+      // Clear previous authentication state
+      setPiAuthenticated(false);
+      setUser(null);
+      setAccessToken(null);
+      setAuthScopes([]);
+      
+      console.log('🔄 Starting fresh authentication...');
+      
       const scopes = ['username', 'payments'];
       
       const auth = await window.Pi.authenticate(scopes, function onIncompletePaymentFound(payment) {
         console.log('🟡 Incomplete payment found during re-auth:', payment);
       });
       
-      console.log('✅ Re-authentication success', auth);
+      console.log('✅ Authentication response:', auth);
       
-      if (auth.scopes && auth.scopes.includes('payments')) {
-        console.log('✅ Payments scope granted');
-        setPiAuthenticated(true);
-        setAuthScopes(auth.scopes);
-      } else {
-        console.warn('⚠️ Payments scope not granted:', auth.scopes);
-        setPiAuthenticated(false);
-        alert('Payments permission is required for transactions. Please grant permission and try again.');
-      }
-      
+      // Always set user data first
       setUser(auth.user);
       setAccessToken(auth.accessToken);
       setUserAddress(auth.user.username);
       
+      // Check granted scopes
+      const grantedScopes = auth.scopes || [];
+      setAuthScopes(grantedScopes);
+      
+      if (grantedScopes.includes('payments')) {
+        console.log('✅ Payments scope granted');
+        setPiAuthenticated(true);
+        alert('✅ Successfully connected! You can now make payments.');
+      } else {
+        console.warn('⚠️ Payments scope not granted:', grantedScopes);
+        setPiAuthenticated(false);
+        
+        // More detailed explanation
+        alert(`⚠️ Authentication successful but payments permission was not granted.\n\nYou granted: ${grantedScopes.join(', ')}\n\nTo make purchases, please:\n1. Try authenticating again\n2. Make sure to approve the "payments" permission when prompted\n3. If you don't see a permission prompt, try refreshing the page`);
+      }
+      
     } catch (error) {
-      console.error('❌ Re-authentication failed:', error);
-      alert(`Authentication failed: ${error.message}`);
+      console.error('❌ Authentication failed:', error);
+      
+      // More specific error messages
+      if (error.message?.includes('denied') || error.message?.includes('cancelled')) {
+        alert('Authentication was cancelled. To use payments, please authenticate and approve all permissions.');
+      } else if (error.message?.includes('network') || error.message?.includes('connection')) {
+        alert('Network error during authentication. Please check your connection and try again.');
+      } else {
+        alert(`Authentication failed: ${error.message || 'Unknown error'}.\n\nPlease try again and make sure to approve all permission requests.`);
+      }
+      
       setPiAuthenticated(false);
     } finally {
       setLoading(false);
     }
   };
 
+  // Force re-authentication with explicit permission request
+  const requestPaymentPermission = async () => {
+    if (!window?.Pi) {
+      alert("Pi SDK not available. Please make sure you're using Pi Browser.");
+      return;
+    }
 
+    // Show user what to expect
+    const userConfirmed = confirm(
+      "To enable payments, you'll be asked to grant permissions.\n\n" +
+      "Please APPROVE the 'payments' permission when prompted.\n\n" +
+      "Click OK to continue with authentication."
+    );
+    
+    if (!userConfirmed) return;
+
+    await reAuthenticate();
+  };
+
+  // Sample product data for the marketplace
+  const products = [
+    { id: 1, name: 'Digital Art NFT', price: 0.5, category: 'art', image: '🎨' },
+    { id: 2, name: 'Music Track', price: 0.2, category: 'music', image: '🎵' },
+    { id: 3, name: 'E-book', price: 0.3, category: 'books', image: '📚' },
+    { id: 4, name: 'Game Item', price: 0.1, category: 'games', image: '🎮' },
+  ];
+
+  const filteredProducts = selectedCategory === 'all' 
+    ? products 
+    : products.filter(product => product.category === selectedCategory);
+
+  const handlePurchase = async (product) => {
+    if (!piAuthenticated) {
+      alert('Please authenticate with Pi first');
+      return;
+    }
+
+    try {
+      const payment = await payPi(
+        product.price,
+        `Purchase: ${product.name}`,
+        { productId: product.id, productName: product.name }
+      );
+      console.log('Purchase successful:', payment);
+    } catch (error) {
+      console.error('Purchase failed:', error);
+    }
+  };
+
+  
   // Sample data
   const recentActivity = [
     { id: 1, type: 'sent', recipient: 'Anna', amount: -1.2504, date: 'Today', icon: Send },
@@ -1391,8 +1465,6 @@ const WePiApp = () => {
     { id: 5, name: 'Gaming Headset', price: 22.3, category: 'electronics', image: '🎮', seller: 'GameGear', rating: 4.8, sales: 456 },
     { id: 6, name: 'Denim Jacket', price: 18.7, category: 'clothing', image: '🧥', seller: 'FashionCo', rating: 4.5, sales: 123 }
   ];
-
-  
 
   const piLearnCourses = [
     { id: 1, title: 'Pi Network Fundamentals', price: 2.5, duration: '2h 30m', level: 'Beginner', students: 1234, rating: 4.9 },
@@ -1439,59 +1511,40 @@ const WePiApp = () => {
 //   );
 // };
 
-  // Sample product data for the marketplace
-  const products = [
-    { id: 1, name: 'Digital Art NFT', price: 0.5, category: 'art', image: '🎨' },
-    { id: 2, name: 'Music Track', price: 0.2, category: 'music', image: '🎵' },
-    { id: 3, name: 'E-book', price: 0.3, category: 'books', image: '📚' },
-    { id: 4, name: 'Game Item', price: 0.1, category: 'games', image: '🎮' },
-  ];
+  const filteredMarketplace = selectedCategory === 'all' 
+    ? marketplaceItems 
+    : marketplaceItems.filter(item => item.category === selectedCategory);
 
-  const filteredProducts = selectedCategory === 'all' 
-    ? products 
-    : products.filter(product => product.category === selectedCategory);
+  const NavButton = ({ icon: Icon, label, isActive, onClick }) => (
+    <button
+      onClick={onClick}
+      className={`flex flex-col items-center space-y-1 px-4 py-2 rounded-lg transition-all ${
+        isActive 
+          ? 'bg-white/20 text-white' 
+          : 'text-white/70 hover:text-white hover:bg-white/10'
+      }`}
+    >
+      <Icon size={20} />
+      <span className="text-xs font-medium">{label}</span>
+    </button>
+  );
 
-  const handlePurchase = async (product) => {
-    if (!piAuthenticated) {
-      alert('Please authenticate with Pi first');
-      return;
-    }
-
-    try {
-      const payment = await payPi(
-        product.price,
-        `Purchase: ${product.name}`,
-        { productId: product.id, productName: product.name }
-      );
-      console.log('Purchase successful:', payment);
-    } catch (error) {
-      console.error('Purchase failed:', error);
-    }
-  };
-
-  // Splash screen timeout
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setShowSplash(false);
-    }, 3000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  if (showSplash) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-6xl mb-4">π</div>
-          <div className="text-white text-2xl font-bold mb-2">WePi</div>
-          <div className="text-gray-300">Decentralized Marketplace</div>
-          <div className="mt-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto"></div>
-          </div>
-        </div>
+  const Header = ({ title, showBack = false }) => (
+    <div className="flex items-center justify-between p-4 bg-gradient-to-r from-purple-600 to-purple-800 text-white">
+      <div className="flex items-center space-x-3">
+        {showBack && (
+          <button onClick={() => setCurrentView('home')} className="p-1">
+            <ArrowRight className="rotate-180" size={20} />
+          </button>
+        )}
+        <h1 className="text-xl font-bold">{title}</h1>
       </div>
-    );
-  }
-
+      <div className="flex items-center space-x-3">
+        <Bell size={20} className="opacity-80" />
+        <Settings size={20} className="opacity-80" />
+      </div>
+    </div>
+  );
 
   const renderHome = () => (
     <div className="space-y-6">
@@ -1883,7 +1936,30 @@ const renderProfile = () => (
     </div>
   </div>
 );
-return (
+ // Splash screen timeout
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSplash(false);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (showSplash) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-6xl mb-4">π</div>
+          <div className="text-white text-2xl font-bold mb-2">WePi</div>
+          <div className="text-gray-300">Decentralized Marketplace</div>
+          <div className="mt-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto"></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white shadow-sm border-b">
@@ -1922,6 +1998,17 @@ return (
                 <div className="flex items-center space-x-2">
                   <span className="text-green-600 text-sm">✅ Authenticated</span>
                   <span className="text-sm text-gray-600">{piBalance.toFixed(4)} π</span>
+                </div>
+              ) : user ? (
+                <div className="flex items-center space-x-2">
+                  <span className="text-yellow-600 text-sm">⚠️ Limited Access</span>
+                  <button 
+                    onClick={requestPaymentPermission} 
+                    disabled={loading}
+                    className="bg-yellow-600 text-white px-3 py-1 rounded text-xs hover:bg-yellow-700 disabled:opacity-50"
+                  >
+                    {loading ? 'Connecting...' : 'Enable Payments'}
+                  </button>
                 </div>
               ) : (
                 <button 
@@ -1988,17 +2075,20 @@ return (
             {!piAuthenticated && (
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-8 max-w-md mx-auto">
                 <h3 className="text-lg font-semibold text-yellow-800 mb-2">
-                  Connect Your Pi Wallet
+                  {user ? 'Enable Payment Permissions' : 'Connect Your Pi Wallet'}
                 </h3>
                 <p className="text-yellow-700 mb-4">
-                  To start buying and selling, please connect your Pi Browser wallet.
+                  {user 
+                    ? 'You\'re connected but need to grant payment permissions to make purchases.' 
+                    : 'To start buying and selling, please connect your Pi Browser wallet.'
+                  }
                 </p>
                 <button 
-                  onClick={reAuthenticate}
+                  onClick={user ? requestPaymentPermission : reAuthenticate}
                   disabled={loading}
                   className="bg-yellow-600 text-white px-6 py-2 rounded-lg hover:bg-yellow-700 disabled:opacity-50"
                 >
-                  {loading ? 'Connecting...' : 'Connect Pi Wallet'}
+                  {loading ? 'Processing...' : user ? 'Grant Payment Permission' : 'Connect Pi Wallet'}
                 </button>
               </div>
             )}
@@ -2070,13 +2160,28 @@ return (
                   </div>
 
                   <div className="text-sm text-gray-600 mb-1">Granted Scopes:</div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 mb-4">
                     {authScopes.map(scope => (
                       <span key={scope} className="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs">
                         {scope}
                       </span>
                     ))}
+                    {!authScopes.includes('payments') && (
+                      <span className="bg-red-100 text-red-800 px-2 py-1 rounded-full text-xs">
+                        payments (missing)
+                      </span>
+                    )}
                   </div>
+                  
+                  {!piAuthenticated && (
+                    <button 
+                      onClick={requestPaymentPermission}
+                      disabled={loading}
+                      className="w-full bg-yellow-600 text-white py-2 rounded-lg hover:bg-yellow-700 disabled:opacity-50 mb-2"
+                    >
+                      {loading ? 'Processing...' : 'Grant Payment Permission'}
+                    </button>
+                  )}
                   
                   <button 
                     onClick={reAuthenticate}
@@ -2111,6 +2216,7 @@ return (
     </div>
   );
 };
+
 
 
 export default WePiApp;
