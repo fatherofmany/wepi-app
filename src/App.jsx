@@ -1374,6 +1374,7 @@ const WePiApp = () => {
     }
   };
 
+
   // Sample data
   const recentActivity = [
     { id: 1, type: 'sent', recipient: 'Anna', amount: -1.2504, date: 'Today', icon: Send },
@@ -1390,6 +1391,8 @@ const WePiApp = () => {
     { id: 5, name: 'Gaming Headset', price: 22.3, category: 'electronics', image: '🎮', seller: 'GameGear', rating: 4.8, sales: 456 },
     { id: 6, name: 'Denim Jacket', price: 18.7, category: 'clothing', image: '🧥', seller: 'FashionCo', rating: 4.5, sales: 123 }
   ];
+
+  
 
   const piLearnCourses = [
     { id: 1, title: 'Pi Network Fundamentals', price: 2.5, duration: '2h 30m', level: 'Beginner', students: 1234, rating: 4.9 },
@@ -1436,40 +1439,59 @@ const WePiApp = () => {
 //   );
 // };
 
-  const filteredMarketplace = selectedCategory === 'all' 
-    ? marketplaceItems 
-    : marketplaceItems.filter(item => item.category === selectedCategory);
+  // Sample product data for the marketplace
+  const products = [
+    { id: 1, name: 'Digital Art NFT', price: 0.5, category: 'art', image: '🎨' },
+    { id: 2, name: 'Music Track', price: 0.2, category: 'music', image: '🎵' },
+    { id: 3, name: 'E-book', price: 0.3, category: 'books', image: '📚' },
+    { id: 4, name: 'Game Item', price: 0.1, category: 'games', image: '🎮' },
+  ];
 
-  const NavButton = ({ icon: Icon, label, isActive, onClick }) => (
-    <button
-      onClick={onClick}
-      className={`flex flex-col items-center space-y-1 px-4 py-2 rounded-lg transition-all ${
-        isActive 
-          ? 'bg-white/20 text-white' 
-          : 'text-white/70 hover:text-white hover:bg-white/10'
-      }`}
-    >
-      <Icon size={20} />
-      <span className="text-xs font-medium">{label}</span>
-    </button>
-  );
+  const filteredProducts = selectedCategory === 'all' 
+    ? products 
+    : products.filter(product => product.category === selectedCategory);
 
-  const Header = ({ title, showBack = false }) => (
-    <div className="flex items-center justify-between p-4 bg-gradient-to-r from-purple-600 to-purple-800 text-white">
-      <div className="flex items-center space-x-3">
-        {showBack && (
-          <button onClick={() => setCurrentView('home')} className="p-1">
-            <ArrowRight className="rotate-180" size={20} />
-          </button>
-        )}
-        <h1 className="text-xl font-bold">{title}</h1>
+  const handlePurchase = async (product) => {
+    if (!piAuthenticated) {
+      alert('Please authenticate with Pi first');
+      return;
+    }
+
+    try {
+      const payment = await payPi(
+        product.price,
+        `Purchase: ${product.name}`,
+        { productId: product.id, productName: product.name }
+      );
+      console.log('Purchase successful:', payment);
+    } catch (error) {
+      console.error('Purchase failed:', error);
+    }
+  };
+
+  // Splash screen timeout
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSplash(false);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (showSplash) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-6xl mb-4">π</div>
+          <div className="text-white text-2xl font-bold mb-2">WePi</div>
+          <div className="text-gray-300">Decentralized Marketplace</div>
+          <div className="mt-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto"></div>
+          </div>
+        </div>
       </div>
-      <div className="flex items-center space-x-3">
-        <Bell size={20} className="opacity-80" />
-        <Settings size={20} className="opacity-80" />
-      </div>
-    </div>
-  );
+    );
+  }
+
 
   const renderHome = () => (
     <div className="space-y-6">
@@ -1861,87 +1883,233 @@ const renderProfile = () => (
     </div>
   </div>
 );
- return (
-  <>
-    {showSplash && <Splash onDone={() => setShowSplash(false)} />}
-
-    {!showSplash && (
-      <div className="max-w-md mx-auto bg-gray-50 min-h-screen">
-        <div className="pb-20">
-          {/* Main Content Views */}
-          {currentView === 'home' && renderHome()}
-          {currentView === 'marketplace' && renderMarketplace()}
-          {currentView === 'pilearn' && renderPiLearn()}
-          {currentView === 'tasks' && renderTasks()}
-          {currentView === 'bills' && renderBills()}
-          {currentView === 'wallet' && renderWallet()}
-          {currentView === 'profile' && renderProfile()}
-          {currentView === 'games' && 
-            <WEPIGames 
-              onBack={() => setCurrentView('home')}
-              piBalance={piBalance}
-              setPiBalance={setPiBalance}
-              userAddress={userAddress}
-              setUserAddress={setUserAddress}
-              payPi={payPi}
-            />}
-          {currentView === 'pilot' && (
-            <PiLotComponent 
-              onBack={() => setCurrentView('home')}
-              piBalance={piBalance}
-              setPiBalance={setPiBalance}
-            />
-          )}
-        </div>
-
-        {/* Bottom Navigation */}
-        <div className="fixed bottom-0 left-1/2 transform -translate-x-1/2 w-full max-w-md">
-          <div className="bg-gradient-to-r from-purple-600 to-purple-800 p-4 rounded-t-3xl shadow-2xl">
-            <div className="flex justify-around">
-              <NavButton
-                icon={Home}
-                label="Home"
-                isActive={currentView === 'home'}
+return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center">
+              <span className="text-2xl">π</span>
+              <span className="ml-2 text-xl font-bold text-gray-900">WePi</span>
+            </div>
+            
+            {/* Desktop Navigation */}
+            <nav className="hidden md:flex space-x-8">
+              <button 
                 onClick={() => setCurrentView('home')}
-              />
-              <NavButton
-                icon={ShoppingBag}
-                label="Market"
-                isActive={currentView === 'marketplace'}
+                className={`${currentView === 'home' ? 'text-purple-600' : 'text-gray-500'} hover:text-purple-600`}
+              >
+                Home
+              </button>
+              <button 
                 onClick={() => setCurrentView('marketplace')}
-              />
-              <NavButton
-                icon={Navigation}
-                label="PiLot"
-                isActive={currentView === 'pilot'}
-                onClick={() => setCurrentView('pilot')}
-              />
-              <NavButton
-                icon={Wallet}
-                label="Wallet"
-                isActive={currentView === 'wallet'}
+                className={`${currentView === 'marketplace' ? 'text-purple-600' : 'text-gray-500'} hover:text-purple-600`}
+              >
+                Marketplace
+              </button>
+              <button 
                 onClick={() => setCurrentView('wallet')}
-              />
-              <NavButton
-                icon={Gift}
-                label="Games"
-                isActive={currentView === 'games'}
-                onClick={() => setCurrentView('games')}
-              />
-              <NavButton
-                icon={User}
-                label="Profile"
-                isActive={currentView === 'profile'}
-                onClick={() => setCurrentView('profile')}
-              />
+                className={`${currentView === 'wallet' ? 'text-purple-600' : 'text-gray-500'} hover:text-purple-600`}
+              >
+                Wallet
+              </button>
+            </nav>
+
+            {/* Pi Authentication Status */}
+            <div className="flex items-center space-x-4">
+              {piAuthenticated ? (
+                <div className="flex items-center space-x-2">
+                  <span className="text-green-600 text-sm">✅ Authenticated</span>
+                  <span className="text-sm text-gray-600">{piBalance.toFixed(4)} π</span>
+                </div>
+              ) : (
+                <button 
+                  onClick={reAuthenticate} 
+                  disabled={loading}
+                  className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700 disabled:opacity-50"
+                >
+                  {loading ? 'Connecting...' : 'Connect Pi'}
+                </button>
+              )}
+              
+              {/* Mobile menu button */}
+              <button 
+                onClick={() => setShowMobileMenu(!showMobileMenu)}
+                className="md:hidden"
+              >
+                <div className="w-6 h-6 flex flex-col justify-center items-center">
+                  <span className="w-4 h-0.5 bg-gray-600 mb-1"></span>
+                  <span className="w-4 h-0.5 bg-gray-600 mb-1"></span>
+                  <span className="w-4 h-0.5 bg-gray-600"></span>
+                </div>
+              </button>
             </div>
           </div>
         </div>
-      </div>
-    )}
-  </>
-);
 
+        {/* Mobile Navigation */}
+        {showMobileMenu && (
+          <div className="md:hidden bg-white border-t">
+            <div className="px-4 py-2 space-y-2">
+              <button 
+                onClick={() => { setCurrentView('home'); setShowMobileMenu(false); }}
+                className="block w-full text-left py-2 text-gray-600 hover:text-purple-600"
+              >
+                Home
+              </button>
+              <button 
+                onClick={() => { setCurrentView('marketplace'); setShowMobileMenu(false); }}
+                className="block w-full text-left py-2 text-gray-600 hover:text-purple-600"
+              >
+                Marketplace
+              </button>
+              <button 
+                onClick={() => { setCurrentView('wallet'); setShowMobileMenu(false); }}
+                className="block w-full text-left py-2 text-gray-600 hover:text-purple-600"
+              >
+                Wallet
+              </button>
+            </div>
+          </div>
+        )}
+      </header>
+
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {currentView === 'home' && (
+          <div className="text-center">
+            <h1 className="text-4xl font-bold text-gray-900 mb-4">
+              Welcome to WePi Marketplace
+            </h1>
+            <p className="text-xl text-gray-600 mb-8">
+              Buy and sell digital goods with Pi cryptocurrency
+            </p>
+            {!piAuthenticated && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-8 max-w-md mx-auto">
+                <h3 className="text-lg font-semibold text-yellow-800 mb-2">
+                  Connect Your Pi Wallet
+                </h3>
+                <p className="text-yellow-700 mb-4">
+                  To start buying and selling, please connect your Pi Browser wallet.
+                </p>
+                <button 
+                  onClick={reAuthenticate}
+                  disabled={loading}
+                  className="bg-yellow-600 text-white px-6 py-2 rounded-lg hover:bg-yellow-700 disabled:opacity-50"
+                >
+                  {loading ? 'Connecting...' : 'Connect Pi Wallet'}
+                </button>
+              </div>
+            )}
+            <button 
+              onClick={() => setCurrentView('marketplace')}
+              className="bg-purple-600 text-white px-8 py-3 rounded-lg text-lg hover:bg-purple-700"
+            >
+              Explore Marketplace
+            </button>
+          </div>
+        )}
+
+        {currentView === 'marketplace' && (
+          <div>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-gray-900">Marketplace</h2>
+              <select 
+                value={selectedCategory} 
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="border border-gray-300 rounded-lg px-3 py-2"
+              >
+                <option value="all">All Categories</option>
+                <option value="art">Art</option>
+                <option value="music">Music</option>
+                <option value="books">Books</option>
+                <option value="games">Games</option>
+              </select>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {filteredProducts.map((product) => (
+                <div key={product.id} className="bg-white rounded-lg shadow-md p-6">
+                  <div className="text-4xl text-center mb-4">{product.image}</div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">{product.name}</h3>
+                  <p className="text-2xl font-bold text-purple-600 mb-4">{product.price} π</p>
+                  <button 
+                    onClick={() => handlePurchase(product)}
+                    disabled={!piAuthenticated || loading}
+                    className="w-full bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {!piAuthenticated ? 'Connect Pi First' : loading ? 'Processing...' : 'Buy Now'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {currentView === 'wallet' && (
+          <div className="max-w-md mx-auto">
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <h2 className="text-2xl font-bold text-gray-900 mb-6 text-center">Pi Wallet</h2>
+              
+              {piAuthenticated ? (
+                <div className="space-y-4">
+                  <div className="text-center">
+                    <div className="text-4xl mb-2">π</div>
+                    <div className="text-3xl font-bold text-purple-600 mb-1">
+                      {piBalance.toFixed(4)}
+                    </div>
+                    <div className="text-gray-600">Pi Balance</div>
+                  </div>
+                  
+                  <div className="border-t pt-4">
+                    <div className="text-sm text-gray-600 mb-1">Username:</div>
+                    <div className="font-mono text-sm bg-gray-100 p-2 rounded break-all">
+                      {userAddress}
+                    </div>
+                  </div>
+
+                  <div className="text-sm text-gray-600 mb-1">Granted Scopes:</div>
+                  <div className="flex flex-wrap gap-2">
+                    {authScopes.map(scope => (
+                      <span key={scope} className="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs">
+                        {scope}
+                      </span>
+                    ))}
+                  </div>
+                  
+                  <button 
+                    onClick={reAuthenticate}
+                    disabled={loading}
+                    className="w-full bg-gray-600 text-white py-2 rounded-lg hover:bg-gray-700 disabled:opacity-50"
+                  >
+                    {loading ? 'Refreshing...' : 'Refresh Connection'}
+                  </button>
+                </div>
+              ) : (
+                <div className="text-center">
+                  <div className="text-6xl mb-4 opacity-50">π</div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                    Connect Your Pi Wallet
+                  </h3>
+                  <p className="text-gray-600 mb-6">
+                    Connect your Pi Browser wallet to view balance and make transactions.
+                  </p>
+                  <button 
+                    onClick={reAuthenticate}
+                    disabled={loading}
+                    className="w-full bg-purple-600 text-white py-3 rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                  >
+                    {loading ? 'Connecting...' : 'Connect Pi Wallet'}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
 };
 
 
