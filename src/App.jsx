@@ -52,6 +52,7 @@ const Splash = ({ onDone }) => {
 };
 
 
+
 // Game configuration for PI Network
 const MAX_PLAYERS_PER_ROUND = 30;
 const GAS_FEES = {
@@ -628,7 +629,7 @@ const WEPIGames = ({ onBack, userAddress, piBalance, setPiBalance, setUserAddres
 
 
 // PiLot Component
-const PiLotComponent = ({ onBack, piBalance, setPiBalance }) => {
+const PiLotComponent = ({ onBack, piBalance, setPiBalance, payPi }) => {
   const [currentStep, setCurrentStep] = useState('booking'); // booking, searching, matched, trip, completed
   const [selectedVehicle, setSelectedVehicle] = useState('standard');
   const [showDriverDetails, setShowDriverDetails] = useState(false);
@@ -1166,167 +1167,307 @@ const WePiApp = () => {
   const [accessToken, setAccessToken] = useState(null);
   const [loading, setLoading] = useState(false);
   const [authScopes, setAuthScopes] = useState([]); // Track granted scopes
+  const [piSdkReady, setPiSdkReady] = useState(false);
+  const [authError, setAuthError] = useState(null);
 
   useEffect(() => {
-    if (window?.Pi) {
-      window.Pi.init({ version: '2.0', sandbox: false });
+    const initializePiSDK = async () => {
+      try {
+        console.log('🔄 Initializing Pi SDK...');
+        console.log('User Agent:', navigator.userAgent);
+        console.log('Pi object available:', !!window.Pi);
 
-      const scopes = ['username', 'payments'];
-      
-      function onIncompletePaymentFound(payment) {
-        console.log('🟡 Incomplete payment found:', payment);
-        // Handle incomplete payment if needed
+        // Check if we're in Pi Browser
+        const isPiBrowser = navigator.userAgent.toLowerCase().includes('pi browser') || 
+                           navigator.userAgent.toLowerCase().includes('pi network');
+        
+        console.log('Is Pi Browser:', isPiBrowser);
+
+        if (!window.Pi) {
+          console.error('❌ Pi SDK not found in window object');
+          setAuthError('Pi SDK not available. Please open this app in Pi Browser.');
+          return;
+        }
+
+        // Wait a bit for Pi SDK to be fully loaded
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Initialize with production settings for Pi Browser
+        const initConfig = {
+          version: "2.0",
+          sandbox: false // This should be false for production Pi Browser
+        };
+
+        console.log('🚀 Calling Pi.init with config:', initConfig);
+        await window.Pi.init(initConfig);
+        
+        console.log('✅ Pi SDK initialized successfully');
+        setPiSdkReady(true);
+
+        // Small delay before authentication
+        setTimeout(() => {
+          authenticateUser();
+        }, 500);
+
+      } catch (error) {
+        console.error('💥 Pi SDK initialization failed:', error);
+        setAuthError(`Pi SDK initialization failed: ${error.message}`);
       }
+    };
 
-      window.Pi.authenticate(scopes, onIncompletePaymentFound)
-        .then(auth => {
-          console.log('✅ Auth success', auth);
-          
-          // Check if we actually got the payments scope
-          if (auth.scopes && auth.scopes.includes('payments')) {
-            console.log('✅ Payments scope granted');
-            setPiAuthenticated(true);
-            setAuthScopes(auth.scopes);
-          } else {
-            console.warn('⚠️ Payments scope not granted:', auth.scopes);
-            setPiAuthenticated(false);
-          }
-          
-          setUser(auth.user);
-          setAccessToken(auth.accessToken);
-          setUserAddress(auth.user.username); // Save Pi username as address
-        })
-        .catch(err => {
-          console.error('❌ Auth failed:', err);
-          setPiAuthenticated(false);
-        });
-    } else {
-      console.error('❌ Pi SDK not available');
-    }
+    initializePiSDK();
   }, []);
 
-  const payPi = async (amount, memo = 'WePi purchase', metadata = {}) => {
-    // Check if Pi SDK is available
-    if (!window?.Pi) {
-      alert("Pi SDK not available. Please open this app in Pi Browser.");
-      return;
-    }
-
-    // Check if user is authenticated with payments scope
-    if (!piAuthenticated || !authScopes.includes('payments')) {
-      alert("Please authenticate with Pi Browser first and grant payments permission.");
-      console.error('❌ Not authenticated or missing payments scope:', { piAuthenticated, authScopes });
+  const authenticateUser = async () => {
+    if (!window.Pi || !piSdkReady) {
+      console.error('❌ Pi SDK not ready for authentication');
       return;
     }
 
     try {
-      console.log('🚀 Starting Pi payment...', { amount, memo, metadata });
+      console.log('🔐 Starting authentication...');
+      setLoading(true);
+      setAuthError(null);
+
+      const scopes = ['username', 'payments'];
+      console.log('Requesting scopes:', scopes);
+
+      // Handle incomplete payments callback
+      function onIncompletePaymentFound(payment) {
+        console.log('🟡 Incomplete payment found:', payment);
+        // You might want to handle this payment
+      }
+
+      console.log('📞 Calling Pi.authenticate...');
+      
+      const auth = await window.Pi.authenticate(scopes, onIncompletePaymentFound);
+      
+      console.log('✅ Authentication response:', {
+        user: auth.user,
+        scopes: auth.scopes,
+        hasAccessToken: !!auth.accessToken
+      });
+
+      // Validate authentication response
+      if (!auth.user || !auth.user.username) {
+        throw new Error('Invalid authentication response: missing user data');
+      }
+
+      if (!auth.accessToken) {
+        throw new Error('Invalid authentication response: missing access token');
+      }
+
+      // Check scopes
+      const hasPaymentsScope = auth.scopes && auth.scopes.includes('payments');
+      const hasUsernameScope = auth.scopes && auth.scopes.includes('username');
+
+      console.log('Scope check:', {
+        hasPaymentsScope,
+        hasUsernameScope,
+        grantedScopes: auth.scopes
+      });
+
+      if (!hasPaymentsScope) {
+        console.warn('⚠️ Payments scope not granted');
+        setAuthError('Payments permission is required. Please grant all permissions.');
+      }
+
+      if (!hasUsernameScope) {
+        console.warn('⚠️ Username scope not granted');
+        setAuthError('Username permission is required. Please grant all permissions.');
+      }
+
+      // Set authentication state
+      setPiAuthenticated(hasPaymentsScope && hasUsernameScope);
+      setAuthScopes(auth.scopes || []);
+      setUser(auth.user);
+      setAccessToken(auth.accessToken);
+      setUserAddress(auth.user.username);
+
+      console.log('🎉 Authentication completed successfully');
+
+    } catch (error) {
+      console.error('💥 Authentication failed:', error);
+      setAuthError(`Authentication failed: ${error.message}`);
+      setPiAuthenticated(false);
+      setAuthScopes([]);
+      setUser(null);
+      setAccessToken(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Enhanced payment function with better error handling
+  const payPi = async (amount, memo = 'WePi purchase', metadata = {}) => {
+    console.log('💳 Payment initiated:', { amount, memo, metadata });
+
+    // Validation checks
+    if (!window?.Pi) {
+      const errorMsg = "Pi SDK not available. Please open this app in Pi Browser.";
+      console.error('❌', errorMsg);
+      alert(errorMsg);
+      return;
+    }
+
+    if (!piSdkReady) {
+      const errorMsg = "Pi SDK not ready. Please wait and try again.";
+      console.error('❌', errorMsg);
+      alert(errorMsg);
+      return;
+    }
+
+    if (!piAuthenticated) {
+      const errorMsg = "Please authenticate first by granting all permissions.";
+      console.error('❌', errorMsg);
+      alert(errorMsg);
+      return;
+    }
+
+    if (!authScopes.includes('payments')) {
+      const errorMsg = "Payments permission required. Please re-authenticate and grant payments permission.";
+      console.error('❌', errorMsg);
+      alert(errorMsg);
+      return;
+    }
+
+    if (!accessToken) {
+      const errorMsg = "No access token available. Please re-authenticate.";
+      console.error('❌', errorMsg);
+      alert(errorMsg);
+      return;
+    }
+
+    try {
       setLoading(true);
 
-      // Create payment with proper callback structure
+      const paymentAmount = parseFloat(amount);
+      if (isNaN(paymentAmount) || paymentAmount <= 0) {
+        throw new Error('Invalid payment amount');
+      }
+
+      console.log('🚀 Creating Pi payment...');
+
       const payment = await new Promise((resolve, reject) => {
         const paymentData = {
-          amount: parseFloat(amount), // Pi SDK expects number, not string
+          amount: paymentAmount,
           memo,
-          metadata,
+          metadata: {
+            ...metadata,
+            timestamp: Date.now(),
+            userAddress: userAddress
+          },
         };
 
+        console.log('Payment data:', paymentData);
+
         const callbacks = {
-          // Called when payment is created and ready for server approval
           onReadyForServerApproval: async function(paymentId) {
             console.log('✅ Payment ready for approval:', paymentId);
             
             try {
-              // Call your backend to approve the payment
               const response = await fetch("https://wepi-backend-production.up.railway.app/payments/approve", {
                 method: "POST",
                 headers: { 
                   "Content-Type": "application/json",
-                  "Authorization": `Bearer ${accessToken}` // Include access token if needed
+                  "Authorization": `Bearer ${accessToken}`
                 },
-                body: JSON.stringify({ paymentId }),
+                body: JSON.stringify({ 
+                  paymentId,
+                  userAddress,
+                  amount: paymentAmount,
+                  memo,
+                  metadata: paymentData.metadata
+                }),
               });
 
               if (!response.ok) {
                 const errorText = await response.text();
-                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                console.error('Server approval failed:', errorText);
+                throw new Error(`Server approval failed: ${response.status} - ${errorText}`);
               }
 
               const data = await response.json();
-              console.log('Server approval response:', data);
+              console.log('✅ Server approval success:', data);
               
-              // Don't resolve here - wait for completion
             } catch (error) {
-              console.error('Server approval failed:', error);
+              console.error('💥 Server approval error:', error);
               reject(new Error(`Server approval failed: ${error.message}`));
             }
           },
 
-          // Called when payment is ready for server completion
           onReadyForServerCompletion: async function(paymentId, txid) {
             console.log('✅ Payment ready for completion:', paymentId, txid);
             
             try {
-              // Call your backend to complete the payment
               const response = await fetch("https://wepi-backend-production.up.railway.app/payments/complete", {
                 method: "POST",
                 headers: { 
                   "Content-Type": "application/json",
-                  "Authorization": `Bearer ${accessToken}` // Include access token if needed
+                  "Authorization": `Bearer ${accessToken}`
                 },
-                body: JSON.stringify({ paymentId, txid }),
+                body: JSON.stringify({ 
+                  paymentId, 
+                  txid,
+                  userAddress,
+                  amount: paymentAmount
+                }),
               });
 
               if (!response.ok) {
                 const errorText = await response.text();
-                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                console.error('Payment completion failed:', errorText);
+                throw new Error(`Payment completion failed: ${response.status} - ${errorText}`);
               }
 
               const data = await response.json();
-              console.log('Payment completion response:', data);
+              console.log('✅ Payment completion success:', data);
               
-              alert(`✅ Payment completed successfully! TxID: ${txid}`);
+              alert(`✅ Payment completed successfully!\nTxID: ${txid}`);
               
-              // Resolve with final payment info
               resolve({
                 paymentId,
                 txid,
                 serverResponse: data,
-                status: 'completed'
+                status: 'completed',
+                amount: paymentAmount
               });
               
             } catch (error) {
-              console.error('Payment completion failed:', error);
+              console.error('💥 Payment completion error:', error);
               reject(new Error(`Payment completion failed: ${error.message}`));
             }
           },
 
-          // Called when payment is cancelled by user
           onCancel: function(paymentId) {
             console.log('❌ Payment cancelled by user:', paymentId);
             alert('Payment was cancelled.');
             reject(new Error('Payment cancelled by user'));
           },
 
-          // Called when there's an error
           onError: function(error, payment) {
             console.error('💥 Payment error:', error, payment);
-            const errorMessage = error.message || error.toString() || 'Unknown payment error';
+            const errorMessage = typeof error === 'string' ? error : 
+                                error?.message || error?.toString() || 'Unknown payment error';
             alert(`Payment failed: ${errorMessage}`);
             reject(new Error(errorMessage));
           }
         };
 
-        // Create the payment with callbacks
-        console.log('Creating payment with data:', paymentData);
-        window.Pi.createPayment(paymentData, callbacks);
+        console.log('📞 Calling Pi.createPayment...');
+        try {
+          window.Pi.createPayment(paymentData, callbacks);
+        } catch (error) {
+          console.error('💥 createPayment call failed:', error);
+          reject(new Error(`Failed to create payment: ${error.message}`));
+        }
       });
 
-      console.log('Payment process completed:', payment);
+      console.log('🎉 Payment process completed:', payment);
       return payment;
 
     } catch (error) {
-      console.error("💥 Payment error:", error);
+      console.error("💥 Payment process error:", error);
       alert(`Payment failed: ${error.message}`);
       throw error;
     } finally {
@@ -1334,121 +1475,34 @@ const WePiApp = () => {
     }
   };
 
-  // Helper function to re-authenticate if needed
+   // Manual re-authentication function
   const reAuthenticate = async () => {
-    if (!window?.Pi) {
-      alert("Pi SDK not available. Please make sure you're using Pi Browser.");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      
-      // Clear previous authentication state
-      setPiAuthenticated(false);
-      setUser(null);
-      setAccessToken(null);
-      setAuthScopes([]);
-      
-      console.log('🔄 Starting fresh authentication...');
-      
-      const scopes = ['username', 'payments'];
-      
-      const auth = await window.Pi.authenticate(scopes, function onIncompletePaymentFound(payment) {
-        console.log('🟡 Incomplete payment found during re-auth:', payment);
-      });
-      
-      console.log('✅ Authentication response:', auth);
-      
-      // Always set user data first
-      setUser(auth.user);
-      setAccessToken(auth.accessToken);
-      setUserAddress(auth.user.username);
-      
-      // Check granted scopes
-      const grantedScopes = auth.scopes || [];
-      setAuthScopes(grantedScopes);
-      
-      if (grantedScopes.includes('payments')) {
-        console.log('✅ Payments scope granted');
-        setPiAuthenticated(true);
-        alert('✅ Successfully connected! You can now make payments.');
-      } else {
-        console.warn('⚠️ Payments scope not granted:', grantedScopes);
-        setPiAuthenticated(false);
-        
-        // More detailed explanation
-        alert(`⚠️ Authentication successful but payments permission was not granted.\n\nYou granted: ${grantedScopes.join(', ')}\n\nTo make purchases, please:\n1. Try authenticating again\n2. Make sure to approve the "payments" permission when prompted\n3. If you don't see a permission prompt, try refreshing the page`);
-      }
-      
-    } catch (error) {
-      console.error('❌ Authentication failed:', error);
-      
-      // More specific error messages
-      if (error.message?.includes('denied') || error.message?.includes('cancelled')) {
-        alert('Authentication was cancelled. To use payments, please authenticate and approve all permissions.');
-      } else if (error.message?.includes('network') || error.message?.includes('connection')) {
-        alert('Network error during authentication. Please check your connection and try again.');
-      } else {
-        alert(`Authentication failed: ${error.message || 'Unknown error'}.\n\nPlease try again and make sure to approve all permission requests.`);
-      }
-      
-      setPiAuthenticated(false);
-    } finally {
-      setLoading(false);
-    }
+    console.log('🔄 Manual re-authentication triggered');
+    setAuthError(null);
+    await authenticateUser();
   };
 
-  // Force re-authentication with explicit permission request
-  const requestPaymentPermission = async () => {
-    if (!window?.Pi) {
-      alert("Pi SDK not available. Please make sure you're using Pi Browser.");
-      return;
-    }
+  // Debug component to show current state
+  const DebugInfo = () => (
+    <div className="bg-yellow-100 p-4 m-4 rounded-lg text-xs">
+      <h4 className="font-bold mb-2">Debug Info:</h4>
+      <div>Pi SDK Ready: {piSdkReady ? '✅' : '❌'}</div>
+      <div>Authenticated: {piAuthenticated ? '✅' : '❌'}</div>
+      <div>User: {user?.username || 'None'}</div>
+      <div>Scopes: {authScopes.join(', ') || 'None'}</div>
+      <div>Access Token: {accessToken ? '✅' : '❌'}</div>
+      <div>Loading: {loading ? '✅' : '❌'}</div>
+      {authError && <div className="text-red-600">Error: {authError}</div>}
+      <button 
+        onClick={reAuthenticate}
+        className="mt-2 bg-blue-500 text-white px-2 py-1 rounded text-xs"
+        disabled={loading}
+      >
+        Re-authenticate
+      </button>
+    </div>
+  );
 
-    // Show user what to expect
-    const userConfirmed = confirm(
-      "To enable payments, you'll be asked to grant permissions.\n\n" +
-      "Please APPROVE the 'payments' permission when prompted.\n\n" +
-      "Click OK to continue with authentication."
-    );
-    
-    if (!userConfirmed) return;
-
-    await reAuthenticate();
-  };
-
-  // Sample product data for the marketplace
-  const products = [
-    { id: 1, name: 'Digital Art NFT', price: 0.5, category: 'art', image: '🎨' },
-    { id: 2, name: 'Music Track', price: 0.2, category: 'music', image: '🎵' },
-    { id: 3, name: 'E-book', price: 0.3, category: 'books', image: '📚' },
-    { id: 4, name: 'Game Item', price: 0.1, category: 'games', image: '🎮' },
-  ];
-
-  const filteredProducts = selectedCategory === 'all' 
-    ? products 
-    : products.filter(product => product.category === selectedCategory);
-
-  const handlePurchase = async (product) => {
-    if (!piAuthenticated) {
-      alert('Please authenticate with Pi first');
-      return;
-    }
-
-    try {
-      const payment = await payPi(
-        product.price,
-        `Purchase: ${product.name}`,
-        { productId: product.id, productName: product.name }
-      );
-      console.log('Purchase successful:', payment);
-    } catch (error) {
-      console.error('Purchase failed:', error);
-    }
-  };
-
-  
   // Sample data
   const recentActivity = [
     { id: 1, type: 'sent', recipient: 'Anna', amount: -1.2504, date: 'Today', icon: Send },
@@ -1548,11 +1602,13 @@ const WePiApp = () => {
 
   const renderHome = () => (
     <div className="space-y-6">
+      {process.env.NODE_ENV === 'development' && <DebugInfo />}
       <Header
   title={
     <div className="flex items-center space-x-2">
       <WePiLogo size="medium" variant="full" />
     </div>
+    
   }
 />
 
@@ -1936,287 +1992,88 @@ const renderProfile = () => (
     </div>
   </div>
 );
- // Splash screen timeout
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setShowSplash(false);
-    }, 3000);
-    return () => clearTimeout(timer);
-  }, []);
+ return (
+  <>
+    {showSplash && <Splash onDone={() => setShowSplash(false)} />}
 
-  if (showSplash) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-6xl mb-4">π</div>
-          <div className="text-white text-2xl font-bold mb-2">WePi</div>
-          <div className="text-gray-300">Decentralized Marketplace</div>
-          <div className="mt-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto"></div>
+    {!showSplash && (
+      <div className="max-w-md mx-auto bg-gray-50 min-h-screen">
+        <div className="pb-20">
+          {/* Main Content Views */}
+          {currentView === 'home' && renderHome()}
+          {currentView === 'marketplace' && renderMarketplace()}
+          {currentView === 'pilearn' && renderPiLearn()}
+          {currentView === 'tasks' && renderTasks()}
+          {currentView === 'bills' && renderBills()}
+          {currentView === 'wallet' && renderWallet()}
+          {currentView === 'profile' && renderProfile()}
+          {currentView === 'games' && 
+            <WEPIGames 
+              onBack={() => setCurrentView('home')}
+              piBalance={piBalance}
+              setPiBalance={setPiBalance}
+              userAddress={userAddress}
+              setUserAddress={setUserAddress}
+              payPi={payPi}
+            />}
+          {currentView === 'pilot' && (
+            <PiLotComponent 
+              onBack={() => setCurrentView('home')}
+              piBalance={piBalance}
+              setPiBalance={setPiBalance}
+            />
+          )}
+        </div>
+
+        {/* Bottom Navigation */}
+        <div className="fixed bottom-0 left-1/2 transform -translate-x-1/2 w-full max-w-md">
+          <div className="bg-gradient-to-r from-purple-600 to-purple-800 p-4 rounded-t-3xl shadow-2xl">
+            <div className="flex justify-around">
+              <NavButton
+                icon={Home}
+                label="Home"
+                isActive={currentView === 'home'}
+                onClick={() => setCurrentView('home')}
+              />
+              <NavButton
+                icon={ShoppingBag}
+                label="Market"
+                isActive={currentView === 'marketplace'}
+                onClick={() => setCurrentView('marketplace')}
+              />
+              <NavButton
+                icon={Navigation}
+                label="PiLot"
+                isActive={currentView === 'pilot'}
+                onClick={() => setCurrentView('pilot')}
+              />
+              <NavButton
+                icon={Wallet}
+                label="Wallet"
+                isActive={currentView === 'wallet'}
+                onClick={() => setCurrentView('wallet')}
+              />
+              <NavButton
+                icon={Gift}
+                label="Games"
+                isActive={currentView === 'games'}
+                onClick={() => setCurrentView('games')}
+              />
+              <NavButton
+                icon={User}
+                label="Profile"
+                isActive={currentView === 'profile'}
+                onClick={() => setCurrentView('profile')}
+              />
+            </div>
           </div>
         </div>
       </div>
-    );
-  }
+    )}
+  </>
+);
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
-              <span className="text-2xl">π</span>
-              <span className="ml-2 text-xl font-bold text-gray-900">WePi</span>
-            </div>
-            
-            {/* Desktop Navigation */}
-            <nav className="hidden md:flex space-x-8">
-              <button 
-                onClick={() => setCurrentView('home')}
-                className={`${currentView === 'home' ? 'text-purple-600' : 'text-gray-500'} hover:text-purple-600`}
-              >
-                Home
-              </button>
-              <button 
-                onClick={() => setCurrentView('marketplace')}
-                className={`${currentView === 'marketplace' ? 'text-purple-600' : 'text-gray-500'} hover:text-purple-600`}
-              >
-                Marketplace
-              </button>
-              <button 
-                onClick={() => setCurrentView('wallet')}
-                className={`${currentView === 'wallet' ? 'text-purple-600' : 'text-gray-500'} hover:text-purple-600`}
-              >
-                Wallet
-              </button>
-            </nav>
-
-            {/* Pi Authentication Status */}
-            <div className="flex items-center space-x-4">
-              {piAuthenticated ? (
-                <div className="flex items-center space-x-2">
-                  <span className="text-green-600 text-sm">✅ Authenticated</span>
-                  <span className="text-sm text-gray-600">{piBalance.toFixed(4)} π</span>
-                </div>
-              ) : user ? (
-                <div className="flex items-center space-x-2">
-                  <span className="text-yellow-600 text-sm">⚠️ Limited Access</span>
-                  <button 
-                    onClick={requestPaymentPermission} 
-                    disabled={loading}
-                    className="bg-yellow-600 text-white px-3 py-1 rounded text-xs hover:bg-yellow-700 disabled:opacity-50"
-                  >
-                    {loading ? 'Connecting...' : 'Enable Payments'}
-                  </button>
-                </div>
-              ) : (
-                <button 
-                  onClick={reAuthenticate} 
-                  disabled={loading}
-                  className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700 disabled:opacity-50"
-                >
-                  {loading ? 'Connecting...' : 'Connect Pi'}
-                </button>
-              )}
-              
-              {/* Mobile menu button */}
-              <button 
-                onClick={() => setShowMobileMenu(!showMobileMenu)}
-                className="md:hidden"
-              >
-                <div className="w-6 h-6 flex flex-col justify-center items-center">
-                  <span className="w-4 h-0.5 bg-gray-600 mb-1"></span>
-                  <span className="w-4 h-0.5 bg-gray-600 mb-1"></span>
-                  <span className="w-4 h-0.5 bg-gray-600"></span>
-                </div>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Mobile Navigation */}
-        {showMobileMenu && (
-          <div className="md:hidden bg-white border-t">
-            <div className="px-4 py-2 space-y-2">
-              <button 
-                onClick={() => { setCurrentView('home'); setShowMobileMenu(false); }}
-                className="block w-full text-left py-2 text-gray-600 hover:text-purple-600"
-              >
-                Home
-              </button>
-              <button 
-                onClick={() => { setCurrentView('marketplace'); setShowMobileMenu(false); }}
-                className="block w-full text-left py-2 text-gray-600 hover:text-purple-600"
-              >
-                Marketplace
-              </button>
-              <button 
-                onClick={() => { setCurrentView('wallet'); setShowMobileMenu(false); }}
-                className="block w-full text-left py-2 text-gray-600 hover:text-purple-600"
-              >
-                Wallet
-              </button>
-            </div>
-          </div>
-        )}
-      </header>
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {currentView === 'home' && (
-          <div className="text-center">
-            <h1 className="text-4xl font-bold text-gray-900 mb-4">
-              Welcome to WePi Marketplace
-            </h1>
-            <p className="text-xl text-gray-600 mb-8">
-              Buy and sell digital goods with Pi cryptocurrency
-            </p>
-            {!piAuthenticated && (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-8 max-w-md mx-auto">
-                <h3 className="text-lg font-semibold text-yellow-800 mb-2">
-                  {user ? 'Enable Payment Permissions' : 'Connect Your Pi Wallet'}
-                </h3>
-                <p className="text-yellow-700 mb-4">
-                  {user 
-                    ? 'You\'re connected but need to grant payment permissions to make purchases.' 
-                    : 'To start buying and selling, please connect your Pi Browser wallet.'
-                  }
-                </p>
-                <button 
-                  onClick={user ? requestPaymentPermission : reAuthenticate}
-                  disabled={loading}
-                  className="bg-yellow-600 text-white px-6 py-2 rounded-lg hover:bg-yellow-700 disabled:opacity-50"
-                >
-                  {loading ? 'Processing...' : user ? 'Grant Payment Permission' : 'Connect Pi Wallet'}
-                </button>
-              </div>
-            )}
-            <button 
-              onClick={() => setCurrentView('marketplace')}
-              className="bg-purple-600 text-white px-8 py-3 rounded-lg text-lg hover:bg-purple-700"
-            >
-              Explore Marketplace
-            </button>
-          </div>
-        )}
-
-        {currentView === 'marketplace' && (
-          <div>
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-gray-900">Marketplace</h2>
-              <select 
-                value={selectedCategory} 
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="border border-gray-300 rounded-lg px-3 py-2"
-              >
-                <option value="all">All Categories</option>
-                <option value="art">Art</option>
-                <option value="music">Music</option>
-                <option value="books">Books</option>
-                <option value="games">Games</option>
-              </select>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-              {filteredProducts.map((product) => (
-                <div key={product.id} className="bg-white rounded-lg shadow-md p-6">
-                  <div className="text-4xl text-center mb-4">{product.image}</div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">{product.name}</h3>
-                  <p className="text-2xl font-bold text-purple-600 mb-4">{product.price} π</p>
-                  <button 
-                    onClick={() => handlePurchase(product)}
-                    disabled={!piAuthenticated || loading}
-                    className="w-full bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {!piAuthenticated ? 'Connect Pi First' : loading ? 'Processing...' : 'Buy Now'}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {currentView === 'wallet' && (
-          <div className="max-w-md mx-auto">
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-6 text-center">Pi Wallet</h2>
-              
-              {piAuthenticated ? (
-                <div className="space-y-4">
-                  <div className="text-center">
-                    <div className="text-4xl mb-2">π</div>
-                    <div className="text-3xl font-bold text-purple-600 mb-1">
-                      {piBalance.toFixed(4)}
-                    </div>
-                    <div className="text-gray-600">Pi Balance</div>
-                  </div>
-                  
-                  <div className="border-t pt-4">
-                    <div className="text-sm text-gray-600 mb-1">Username:</div>
-                    <div className="font-mono text-sm bg-gray-100 p-2 rounded break-all">
-                      {userAddress}
-                    </div>
-                  </div>
-
-                  <div className="text-sm text-gray-600 mb-1">Granted Scopes:</div>
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {authScopes.map(scope => (
-                      <span key={scope} className="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs">
-                        {scope}
-                      </span>
-                    ))}
-                    {!authScopes.includes('payments') && (
-                      <span className="bg-red-100 text-red-800 px-2 py-1 rounded-full text-xs">
-                        payments (missing)
-                      </span>
-                    )}
-                  </div>
-                  
-                  {!piAuthenticated && (
-                    <button 
-                      onClick={requestPaymentPermission}
-                      disabled={loading}
-                      className="w-full bg-yellow-600 text-white py-2 rounded-lg hover:bg-yellow-700 disabled:opacity-50 mb-2"
-                    >
-                      {loading ? 'Processing...' : 'Grant Payment Permission'}
-                    </button>
-                  )}
-                  
-                  <button 
-                    onClick={reAuthenticate}
-                    disabled={loading}
-                    className="w-full bg-gray-600 text-white py-2 rounded-lg hover:bg-gray-700 disabled:opacity-50"
-                  >
-                    {loading ? 'Refreshing...' : 'Refresh Connection'}
-                  </button>
-                </div>
-              ) : (
-                <div className="text-center">
-                  <div className="text-6xl mb-4 opacity-50">π</div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                    Connect Your Pi Wallet
-                  </h3>
-                  <p className="text-gray-600 mb-6">
-                    Connect your Pi Browser wallet to view balance and make transactions.
-                  </p>
-                  <button 
-                    onClick={reAuthenticate}
-                    disabled={loading}
-                    className="w-full bg-purple-600 text-white py-3 rounded-lg hover:bg-purple-700 disabled:opacity-50"
-                  >
-                    {loading ? 'Connecting...' : 'Connect Pi Wallet'}
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </main>
-    </div>
-  );
 };
-
 
 
 export default WePiApp;
